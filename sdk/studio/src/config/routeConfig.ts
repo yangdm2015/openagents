@@ -15,6 +15,7 @@ import DocumentsMainPage from "@/pages/documents/DocumentsMainPage"
 // import SettingsMainPage from "@/pages/settings/SettingsMainPage";
 import ProfileMainPage from "@/pages/profile/ProfileMainPage"
 import UserDashboard from "@/pages/profile/UserDashboard"
+import LocalAgentsPanel from "@/pages/profile/LocalAgentsPanel"
 import AgentWorldMainPage from "@/pages/agentworld/AgentWorldMainPage"
 import ReadmeMainPage from "@/pages/readme/ReadmeMainPage"
 import ModManagementPage from "@/pages/mod-management/ModManagementPage"
@@ -188,6 +189,23 @@ export const NavigationIcons = {
         strokeLinejoin: "round",
         strokeWidth: 2,
         d: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z",
+      })
+    )
+  ),
+  Agents: React.memo(() =>
+    React.createElement(
+      "svg",
+      {
+        className: "w-6 h-6",
+        fill: "none",
+        stroke: "currentColor",
+        viewBox: "0 0 24 24",
+      },
+      React.createElement("path", {
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        strokeWidth: 2,
+        d: "M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m0-4a4 4 0 100-8 4 4 0 000 8zm8 0a4 4 0 100-8 4 4 0 000 8z",
       })
     )
   ),
@@ -424,6 +442,21 @@ export const dynamicRouteConfig: RouteConfig[] = [
       icon: "Messages",
       visible: true,
       order: 1,
+      group: "primary",
+    },
+  },
+  {
+    path: "/agents/*",
+    element: LocalAgentsPanel,
+    title: "Agents",
+    requiresAuth: true,
+    requiresLayout: true,
+    navigationConfig: {
+      key: PLUGIN_NAME_ENUM.AGENTS,
+      label: "Agents",
+      icon: "Agents",
+      visible: true,
+      order: 1.1,
       group: "primary",
     },
   },

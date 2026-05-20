@@ -600,6 +600,7 @@ class Daemon {
       type: this._getRuntimeType(agentCfg),
       model: agentCfg.model || '',
       description: agentCfg.description || '',
+      runtime_config: agentCfg.runtime_config || {},
       network: agentCfg.network || '',
       env: agentCfg.env || {},
       path: agentCfg.path || '',

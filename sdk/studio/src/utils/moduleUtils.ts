@@ -85,6 +85,7 @@ export const updateRouteVisibilityFromModules = (
   Object.values(PLUGIN_NAME_ENUM).forEach((plugin) => {
     if (
       plugin !== PLUGIN_NAME_ENUM.PROFILE &&
+      plugin !== PLUGIN_NAME_ENUM.AGENTS &&
       plugin !== PLUGIN_NAME_ENUM.README
     ) {
       updateRouteVisibility(plugin, false)
@@ -95,6 +96,7 @@ export const updateRouteVisibilityFromModules = (
   // LLM_LOGS and SERVICE_AGENTS are admin-only (shown in admin dashboard)
   // AGENTWORLD visibility is controlled by whether the mod is enabled
   updateRouteVisibility(PLUGIN_NAME_ENUM.PROFILE, true)
+  updateRouteVisibility(PLUGIN_NAME_ENUM.AGENTS, true)
   updateRouteVisibility(PLUGIN_NAME_ENUM.README, true)
 
   // Then enable routes based on mods returned from network
@@ -147,6 +149,7 @@ export const isRouteAvailable = (
   // Note: agentworld visibility is controlled by whether the mod is enabled
   const alwaysAvailableRoutes = [
     "profile",
+    "agents",
     "settings",
     "mod-management",
     "network-selection",

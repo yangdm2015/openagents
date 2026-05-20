@@ -8,6 +8,7 @@ export enum PLUGIN_NAME_ENUM {
   DOCUMENTS = "documents",
   SETTINGS = "settings",
   PROFILE = "profile",
+  AGENTS = "agents",
   MCP = "mcp",
   AGENTWORLD = "agentworld",
   README = "readme",

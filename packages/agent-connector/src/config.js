@@ -58,7 +58,7 @@ class Config {
     fs.writeFileSync(this.configFile, serializeYaml(config), 'utf-8');
   }
 
-  addAgent({ name, type, role, model, description, path: agentPath, env, network, channels }) {
+  addAgent({ name, type, role, model, description, runtime_config, runtimeConfig, path: agentPath, env, network, channels }) {
     const config = this.load();
     if (config.agents.some((a) => a.name === name)) {
       throw new Error(`Agent '${name}' already exists`);
@@ -66,6 +66,8 @@ class Config {
     const entry = { name, type: type || 'openclaw', role: role || 'worker' };
     if (model) entry.model = model;
     if (description) entry.description = description;
+    const runtimeConfigEntry = normalizeRuntimeConfig(runtime_config || runtimeConfig);
+    if (Object.keys(runtimeConfigEntry).length > 0) entry.runtime_config = runtimeConfigEntry;
     if (agentPath) entry.path = agentPath;
     if (network) entry.network = network;
     if (channels && channels.length > 0) entry.channels = channels;
@@ -114,7 +116,7 @@ class Config {
     return agent.env || {};
   }
 
-  addAction({ name, runtime, type, model, description, path: actionPath, env, network, channels }) {
+  addAction({ name, runtime, type, model, description, runtime_config, runtimeConfig, path: actionPath, env, network, channels }) {
     const config = this.load();
     config.actions = config.actions || [];
     if (config.actions.some((a) => a.name === name)) {
@@ -123,6 +125,8 @@ class Config {
     const entry = { name, runtime: runtime || type || 'coco' };
     if (model) entry.model = model;
     if (description) entry.description = description;
+    const runtimeConfigEntry = normalizeRuntimeConfig(runtime_config || runtimeConfig);
+    if (Object.keys(runtimeConfigEntry).length > 0) entry.runtime_config = runtimeConfigEntry;
     if (actionPath) entry.path = actionPath;
     if (network) entry.network = network;
     if (channels && channels.length > 0) entry.channels = channels;
@@ -307,6 +311,17 @@ class Config {
 
     return { removed, remaining: keptLines.length };
   }
+}
+
+
+function normalizeRuntimeConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const cleaned = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === null || raw === undefined || raw === '') continue;
+    cleaned[key] = raw;
+  }
+  return cleaned;
 }
 
 // -- YAML parser (compatible with Python SDK's daemon.yaml format) --

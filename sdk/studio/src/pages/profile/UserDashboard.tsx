@@ -95,8 +95,9 @@ const UserDashboard: React.FC = () => {
         )
       }
     })
-    // Always include PROFILE and README
+    // Always include PROFILE, AGENTS, and README
     keys.add(PLUGIN_NAME_ENUM.PROFILE)
+    keys.add(PLUGIN_NAME_ENUM.AGENTS)
     keys.add(PLUGIN_NAME_ENUM.README)
     console.log("📊 UserDashboard enabled modules:", enabledModules)
     console.log("📊 UserDashboard enabled plugin keys:", Array.from(keys))
@@ -161,6 +162,7 @@ const UserDashboard: React.FC = () => {
       [PLUGIN_NAME_ENUM.WIKI]: tLayout("navigation.wiki"),
       [PLUGIN_NAME_ENUM.DOCUMENTS]: tLayout("navigation.documents"),
       [PLUGIN_NAME_ENUM.AGENTWORLD]: tLayout("navigation.agentWorld"),
+      [PLUGIN_NAME_ENUM.AGENTS]: "Agents",
       [PLUGIN_NAME_ENUM.PROFILE]: tLayout("navigation.profile"),
       [PLUGIN_NAME_ENUM.README]: tLayout("navigation.readme"),
       [PLUGIN_NAME_ENUM.MOD_MANAGEMENT]: tLayout("navigation.modManagement"),
@@ -371,7 +373,7 @@ const UserDashboard: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <Card
               className="cursor-pointer hover:bg-accent transition-colors border-gray-200 dark:border-gray-700"
-              onClick={() => navigate("/profile/local-agents#create-agent")}
+              onClick={() => navigate("/agents#create-agent")}
             >
               <CardContent className="flex items-center space-x-3 p-4">
                 <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center flex-shrink-0">
@@ -380,7 +382,7 @@ const UserDashboard: React.FC = () => {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium">New Agent</div>
                   <CardDescription className="text-xs mt-0.5">
-                    Create a local Coco agent
+                    Choose runtime, model, and local config
                   </CardDescription>
                 </div>
               </CardContent>
@@ -388,7 +390,7 @@ const UserDashboard: React.FC = () => {
 
             <Card
               className="cursor-pointer hover:bg-accent transition-colors border-gray-200 dark:border-gray-700"
-              onClick={() => navigate("/profile/local-agents#create-channel")}
+              onClick={() => navigate("/agents#create-channel")}
             >
               <CardContent className="flex items-center space-x-3 p-4">
                 <div className="w-10 h-10 rounded-full bg-cyan-100 dark:bg-cyan-900 flex items-center justify-center flex-shrink-0">

@@ -38,6 +38,8 @@ class CodexAdapter extends BaseAdapter {
     this._directApiKey = env.OPENAI_API_KEY || '';
     this._directBaseUrl = (env.OPENAI_BASE_URL || '').replace(/\/+$/, '');
     this._directModel = env.CODEX_MODEL || env.OPENCLAW_MODEL || '';
+    this._reasoningEffort = String(env.CODEX_REASONING_EFFORT || env.OPENCLAW_REASONING_EFFORT || '').trim();
+    this._verbosity = String(env.CODEX_VERBOSITY || '').trim();
 
     // Per-channel thread tracking (like Claude's session IDs)
     this._channelThreads = {};
@@ -248,6 +250,8 @@ class CodexAdapter extends BaseAdapter {
 
     // Set model via env if configured
     if (this._directModel) env.CODEX_MODEL = this._directModel;
+    if (this._reasoningEffort) env.CODEX_REASONING_EFFORT = this._reasoningEffort;
+    if (this._verbosity) env.CODEX_VERBOSITY = this._verbosity;
     if (this._directApiKey) env.OPENAI_API_KEY = this._directApiKey;
     if (this._directBaseUrl) env.OPENAI_BASE_URL = this._directBaseUrl;
 
@@ -269,6 +273,12 @@ class CodexAdapter extends BaseAdapter {
       // Model override
       if (this._directModel) {
         cmd.push('-m', this._directModel);
+      }
+      if (this._reasoningEffort) {
+        cmd.push('-c', `model_reasoning_effort=\"${this._reasoningEffort}\"`);
+      }
+      if (this._verbosity) {
+        cmd.push('-c', `model_verbosity=\"${this._verbosity}\"`);
       }
 
       // Working directory

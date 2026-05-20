@@ -96,6 +96,7 @@ class LocalApiServer {
     const runtime = this._normalizeRuntime(body.type || body.agent_type || body.runtime || 'coco');
     const model = this._cleanText(body.model || (body.config && body.config.model));
     const description = this._cleanText(body.description || (body.config && body.config.description));
+    const runtimeConfig = this._runtimeConfig(body);
 
     if (body.network) {
       const network = body.network;
@@ -117,8 +118,9 @@ class LocalApiServer {
       role: body.role || 'worker',
       model,
       description,
-      path: body.path || body.workdir,
-      env: this._envWithModel(runtime, body.env || {}, model),
+      runtime_config: runtimeConfig,
+      path: body.path || body.workdir || runtimeConfig.workdir,
+      env: this._envWithRuntimeConfig(runtime, body.env || {}, model, runtimeConfig),
       network: body.network ? (body.network.slug || body.network.id || 'sdk-local') : body.networkSlug,
       channels: (body.network && body.network.channels) || body.channels || [],
     });
@@ -135,13 +137,15 @@ class LocalApiServer {
     const runtime = this._normalizeRuntime(body.runtime || body.type || body.agent_type || 'coco');
     const model = this._cleanText(body.model || (body.config && body.config.model));
     const description = this._cleanText(body.description || (body.config && body.config.description));
+    const runtimeConfig = this._runtimeConfig(body);
     this.connector.addAction({
       name,
       runtime,
       model,
       description,
-      path: body.path || body.workdir,
-      env: this._envWithModel(runtime, body.env || {}, model),
+      runtime_config: runtimeConfig,
+      path: body.path || body.workdir || runtimeConfig.workdir,
+      env: this._envWithRuntimeConfig(runtime, body.env || {}, model, runtimeConfig),
       network: body.network ? networkSlug : body.networkSlug,
       channels: (body.network && body.network.channels) || body.channels || [],
     });
@@ -160,13 +164,39 @@ class LocalApiServer {
     return value.trim();
   }
 
-  _envWithModel(runtime, env, model) {
+  _runtimeConfig(body) {
+    const raw = body.runtime_config || body.runtimeConfig ||
+      (body.config && (body.config.runtime_config || body.config.runtimeConfig)) || {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const cleaned = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === null || value === undefined || value === '') continue;
+      cleaned[key] = typeof value === 'string' ? value.trim() : value;
+    }
+    return cleaned;
+  }
+
+  _envWithRuntimeConfig(runtime, env, model, runtimeConfig = {}) {
     const merged = { ...(env || {}) };
-    if (!model) return merged;
-    merged.LLM_MODEL = model;
-    if (runtime === 'codex') merged.CODEX_MODEL = model;
-    if (runtime === 'claude') merged.CLAUDE_MODEL = model;
-    if (runtime === 'coco') merged.COCO_MODEL = model;
+    if (model) {
+      merged.LLM_MODEL = model;
+      if (runtime === 'codex') merged.CODEX_MODEL = model;
+      if (runtime === 'claude') merged.CLAUDE_MODEL = model;
+      if (runtime === 'coco') merged.COCO_MODEL = model;
+    }
+
+    if (runtime === 'codex') {
+      if (runtimeConfig.reasoning_effort) merged.CODEX_REASONING_EFFORT = String(runtimeConfig.reasoning_effort);
+      if (runtimeConfig.reasoningEffort) merged.CODEX_REASONING_EFFORT = String(runtimeConfig.reasoningEffort);
+      if (runtimeConfig.verbosity) merged.CODEX_VERBOSITY = String(runtimeConfig.verbosity);
+    } else if (runtime === 'claude') {
+      if (runtimeConfig.max_turns) merged.CLAUDE_CODE_MAX_TURNS = String(runtimeConfig.max_turns);
+      if (runtimeConfig.maxTurns) merged.CLAUDE_CODE_MAX_TURNS = String(runtimeConfig.maxTurns);
+    } else if (runtime === 'coco') {
+      if (runtimeConfig.bin) merged.COCO_BIN = String(runtimeConfig.bin);
+      if (runtimeConfig.args) merged.COCO_ARGS = String(runtimeConfig.args);
+      if (runtimeConfig.workdir) merged.COCO_WORKDIR = String(runtimeConfig.workdir);
+    }
     return merged;
   }
 

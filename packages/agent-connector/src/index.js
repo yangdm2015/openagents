@@ -86,6 +86,7 @@ class AgentConnector {
         role: a.role || 'worker',
         model: a.model || null,
         description: a.description || '',
+        runtime_config: a.runtime_config || {},
         network: a.network || null,
         networkName: network ? (network.name || network.slug) : null,
         path: a.path || null,
@@ -109,6 +110,7 @@ class AgentConnector {
         type: runtime,
         model: a.model || null,
         description: a.description || '',
+        runtime_config: a.runtime_config || {},
         network: a.network || null,
         networkName: network ? (network.name || network.slug) : null,
         path: a.path || null,
@@ -119,13 +121,13 @@ class AgentConnector {
     });
   }
 
-  addAgent({ name, type, role, model, description, path, env, network, channels }) {
-    this.config.addAgent({ name, type: type || 'openclaw', role: role || 'worker', model, description, path, env, network, channels });
+  addAgent({ name, type, role, model, description, runtime_config, runtimeConfig, path, env, network, channels }) {
+    this.config.addAgent({ name, type: type || 'openclaw', role: role || 'worker', model, description, runtime_config: runtime_config || runtimeConfig, path, env, network, channels });
     return { success: true };
   }
 
-  addAction({ name, runtime, type, model, description, path, env, network, channels }) {
-    this.config.addAction({ name, runtime: runtime || type || 'coco', model, description, path, env, network, channels });
+  addAction({ name, runtime, type, model, description, runtime_config, runtimeConfig, path, env, network, channels }) {
+    this.config.addAction({ name, runtime: runtime || type || 'coco', model, description, runtime_config: runtime_config || runtimeConfig, path, env, network, channels });
     return { success: true };
   }
 

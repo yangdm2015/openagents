@@ -41,6 +41,7 @@ const ModSidebar: React.FC = () => {
       [PLUGIN_NAME_ENUM.WIKI]: t('navigation.wiki'),
       [PLUGIN_NAME_ENUM.DOCUMENTS]: t('navigation.documents'),
       [PLUGIN_NAME_ENUM.AGENTWORLD]: t('navigation.agentWorld'),
+      [PLUGIN_NAME_ENUM.AGENTS]: 'Agents',
       [PLUGIN_NAME_ENUM.PROFILE]: t('navigation.profile'),
       [PLUGIN_NAME_ENUM.README]: t('navigation.readme'),
       [PLUGIN_NAME_ENUM.MOD_MANAGEMENT]: t('navigation.modManagement'),

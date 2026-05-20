@@ -40,10 +40,11 @@ test('local API requires pairing token and stores SDK action config locally', as
 
     const token = connector.getPairingToken();
     const created = await request(baseUrl, 'POST', '/api/actions', {
-      name: 'coco-one',
-      runtime: 'claude',
-      model: 'claude-sonnet-4-5',
+      name: 'codex-one',
+      runtime: 'codex',
+      model: 'gpt-5.1-codex',
       description: 'Handles private channel coding tasks',
+      runtime_config: { reasoning_effort: 'high', verbosity: 'low' },
       path: '/tmp/work',
       env: { SECRET_KEY: 'local-only' },
       network: {
@@ -59,15 +60,18 @@ test('local API requires pairing token and stores SDK action config locally', as
 
     const actions = connector.listActions();
     assert.equal(actions.length, 1);
-    assert.equal(actions[0].name, 'coco-one');
-    assert.equal(actions[0].runtime, 'claude');
-    assert.equal(actions[0].model, 'claude-sonnet-4-5');
+    assert.equal(actions[0].name, 'codex-one');
+    assert.equal(actions[0].runtime, 'codex');
+    assert.equal(actions[0].model, 'gpt-5.1-codex');
     assert.equal(actions[0].description, 'Handles private channel coding tasks');
+    assert.deepEqual(actions[0].runtime_config, { reasoning_effort: 'high', verbosity: 'low' });
     assert.equal(actions[0].network, 'sdk-local');
     assert.deepEqual(actions[0].channels, ['u_owner_alpha']);
     assert.equal(actions[0].env.SECRET_KEY, 'local-only');
-    assert.equal(actions[0].instanceEnv.LLM_MODEL, 'claude-sonnet-4-5');
-    assert.equal(actions[0].instanceEnv.CLAUDE_MODEL, 'claude-sonnet-4-5');
+    assert.equal(actions[0].instanceEnv.LLM_MODEL, 'gpt-5.1-codex');
+    assert.equal(actions[0].instanceEnv.CODEX_MODEL, 'gpt-5.1-codex');
+    assert.equal(actions[0].instanceEnv.CODEX_REASONING_EFFORT, 'high');
+    assert.equal(actions[0].instanceEnv.CODEX_VERBOSITY, 'low');
 
     const networks = connector.config.getNetworks();
     assert.equal(networks.length, 1);

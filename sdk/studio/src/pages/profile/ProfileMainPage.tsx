@@ -1,12 +1,7 @@
-import React, { useState } from "react"
+import React from "react"
 import { useTranslation } from "react-i18next"
-import { Routes, Route, useNavigate, useLocation } from "react-router-dom"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
-import { Menu } from "lucide-react"
-import { useIsMobile } from "@/hooks/useMediaQuery"
-import ProfileSidebar from "./ProfileSidebar"
 import { useProfileData } from "./hooks/useProfileData"
 import { useIsAdmin } from "@/hooks/useIsAdmin"
 import { cn } from "@/lib/utils"
@@ -22,7 +17,6 @@ import AgentGroupsManagement from "./AgentGroupsManagement"
 import EventLogs from "./EventLogs"
 import EventDebugger from "./EventDebugger"
 import ModManagementPage from "../mod-management/ModManagementPage"
-import LocalAgentsPanel from "./LocalAgentsPanel"
 // NetworkImportExport component available for future use
 
 /**
@@ -58,26 +52,6 @@ const ProfileTabNavigation: React.FC = () => {
             strokeLinejoin="round"
             strokeWidth={2}
             d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-          />
-        </svg>
-      ),
-    },
-    {
-      id: "local_agents",
-      label: "My Agents",
-      path: "/profile/local-agents",
-      icon: (
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 3h6m-8 8h10M7 21h10a2 2 0 002-2v-8a4 4 0 00-4-4H9a4 4 0 00-4 4v8a2 2 0 002 2z"
           />
         </svg>
       ),
@@ -160,27 +134,6 @@ const ProfileTabNavigation: React.FC = () => {
  */
 const ProfileMainPage: React.FC = () => {
   const { t } = useTranslation("profile")
-  const isMobile = useIsMobile()
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const location = useLocation()
-
-  // Close drawer when route changes on mobile
-  React.useEffect(() => {
-    if (isMobile) {
-      setIsDrawerOpen(false)
-    }
-  }, [location.pathname, isMobile])
-
-  // Sidebar content component
-  const SidebarContent = () => (
-    <div className="lg:rounded-s-xl bg-white dark:bg-gray-800 overflow-hidden border-r border-gray-200 dark:border-gray-700 flex flex-col w-full h-full">
-      <ScrollArea className="shrink-0 flex-1 mt-0 mb-2.5 h-full">
-        <div className="h-full">
-          <ProfileSidebar />
-        </div>
-      </ScrollArea>
-    </div>
-  )
 
   return (
     <div className="h-full flex overflow-hidden dark:bg-zinc-950 relative">
@@ -227,7 +180,7 @@ const ProfileMainPage: React.FC = () => {
           <Route path="network-profile" element={<NetworkProfile />} />
           <Route path="agent-groups" element={<AgentGroupsManagement />} />
           <Route path="mod-management" element={<ModManagementPage />} />
-          <Route path="local-agents" element={<LocalAgentsPanel />} />
+          <Route path="local-agents" element={<Navigate to="/agents" replace />} />
 
           {/* Event Logs subpage */}
           <Route path="event-logs" element={<EventLogs />} />
