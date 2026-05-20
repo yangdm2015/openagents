@@ -151,6 +151,34 @@ const UserDashboardSidebar: React.FC = () => {
           </>
         )}
 
+        <div className="flex items-center px-2 mb-2 mt-4">
+          <div className="flex-1 border-t border-gray-300 dark:border-gray-600"></div>
+          <span className="px-3 text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+            My Space
+          </span>
+          <div className="flex-1 border-t border-gray-300 dark:border-gray-600"></div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigate("/profile/local-agents");
+          }}
+          className={`w-full flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-all mb-1 ${
+            isRouteActive("/profile/local-agents")
+              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+              : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+          }`}
+        >
+          <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3h6m-8 8h10M7 21h10a2 2 0 002-2v-8a4 4 0 00-4-4H9a4 4 0 00-4 4v8a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <span className="ml-3">My Agents & Channels</span>
+        </button>
+
         {/* Section Header - Secondary Modules */}
         {secondaryRoutes.length > 0 && (
           <>

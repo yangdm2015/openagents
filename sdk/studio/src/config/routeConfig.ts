@@ -4,6 +4,7 @@ import { PLUGIN_NAME_ENUM } from "@/types/plugins"
 // Pages
 import NetworkSelectionPage from "@/pages/NetworkSelectionPage"
 import AgentSetupPage from "@/pages/AgentSetupPage"
+import UserLoginPage from "@/pages/UserLoginPage"
 import AdminLoginPage from "@/pages/AdminLoginPage"
 import MessagingMainPage from "@/pages/messaging/MessagingMainPage"
 import ProjectMainPage from "@/pages/project/ProjectMainPage"
@@ -383,6 +384,12 @@ export const dynamicRouteConfig: RouteConfig[] = [
     path: "/",
     element: NetworkSelectionPage,
     title: "Network Selection",
+    requiresLayout: false,
+  },
+  {
+    path: "/user-login",
+    element: UserLoginPage,
+    title: "User Login",
     requiresLayout: false,
   },
   {

@@ -38,6 +38,7 @@ dependencies = [
     "websockets>=11.0",
     "asyncio-throttle>=1.0.0",
     "requests>=2.25.0",
+    "PyJWT[crypto]>=2.8.0",
 
     # CLI and user interface
     "click>=8.1.0",           # Enhanced CLI framework

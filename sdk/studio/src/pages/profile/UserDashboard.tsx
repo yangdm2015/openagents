@@ -18,7 +18,7 @@ import { ScrollArea } from "@/components/layout/ui/scroll-area"
 import { Button } from "@/components/layout/ui/button"
 import { Badge } from "@/components/layout/ui/badge"
 import { EmptyState } from "@/components/layout/ui/empty-state"
-import { RefreshCw, Users, Package } from "lucide-react"
+import { Bot, MessageSquarePlus, RefreshCw, Users, Package } from "lucide-react"
 import { useProfileData } from "./hooks/useProfileData"
 
 // Module name to plugin enum mapping (same as in moduleUtils)
@@ -362,6 +362,48 @@ const UserDashboard: React.FC = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* Personal setup shortcuts */}
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            My Agents & Channels
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card
+              className="cursor-pointer hover:bg-accent transition-colors border-gray-200 dark:border-gray-700"
+              onClick={() => navigate("/profile/local-agents#create-agent")}
+            >
+              <CardContent className="flex items-center space-x-3 p-4">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">New Agent</div>
+                  <CardDescription className="text-xs mt-0.5">
+                    Create a local Coco agent
+                  </CardDescription>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className="cursor-pointer hover:bg-accent transition-colors border-gray-200 dark:border-gray-700"
+              onClick={() => navigate("/profile/local-agents#create-channel")}
+            >
+              <CardContent className="flex items-center space-x-3 p-4">
+                <div className="w-10 h-10 rounded-full bg-cyan-100 dark:bg-cyan-900 flex items-center justify-center flex-shrink-0">
+                  <MessageSquarePlus className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">New Channel</div>
+                  <CardDescription className="text-xs mt-0.5">
+                    Create a private channel
+                  </CardDescription>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
         {/* Apps Section - README + Primary Modules */}
         <div className="mb-4">

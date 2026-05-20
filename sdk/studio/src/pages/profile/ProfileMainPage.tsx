@@ -22,6 +22,7 @@ import AgentGroupsManagement from "./AgentGroupsManagement"
 import EventLogs from "./EventLogs"
 import EventDebugger from "./EventDebugger"
 import ModManagementPage from "../mod-management/ModManagementPage"
+import LocalAgentsPanel from "./LocalAgentsPanel"
 // NetworkImportExport component available for future use
 
 /**
@@ -57,6 +58,26 @@ const ProfileTabNavigation: React.FC = () => {
             strokeLinejoin="round"
             strokeWidth={2}
             d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "local_agents",
+      label: "My Agents",
+      path: "/profile/local-agents",
+      icon: (
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 3h6m-8 8h10M7 21h10a2 2 0 002-2v-8a4 4 0 00-4-4H9a4 4 0 00-4 4v8a2 2 0 002 2z"
           />
         </svg>
       ),
@@ -206,6 +227,7 @@ const ProfileMainPage: React.FC = () => {
           <Route path="network-profile" element={<NetworkProfile />} />
           <Route path="agent-groups" element={<AgentGroupsManagement />} />
           <Route path="mod-management" element={<ModManagementPage />} />
+          <Route path="local-agents" element={<LocalAgentsPanel />} />
 
           {/* Event Logs subpage */}
           <Route path="event-logs" element={<EventLogs />} />

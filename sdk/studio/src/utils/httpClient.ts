@@ -7,6 +7,7 @@
  */
 
 import { eventLogService } from "@/services/eventLogService";
+import { getUserAuthToken } from "@/services/userAuthService";
 import { networkLogger } from "@/utils/logger";
 
 // Network bridge URL for published networks (handles direct + relay connections)
@@ -160,6 +161,10 @@ export const networkFetch = async (
   // Build headers
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
+  const userToken = getUserAuthToken();
+  if (userToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${userToken}`);
+  }
   
   const method = options.method || "GET";
   const startTime = Date.now();

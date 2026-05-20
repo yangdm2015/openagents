@@ -31,8 +31,8 @@ const NetworkSelectionView: React.FC = () => {
           return
         }
 
-        // Network is initialized, proceed to agent setup
-        navigate("/agent-setup", { replace: true })
+        // Network is initialized, proceed to SDK local account login
+        navigate("/user-login", { replace: true })
       } catch (error) {
         console.error("Error checking onboarding status:", error)
         // On error, redirect to onboarding to be safe

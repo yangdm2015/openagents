@@ -1,4 +1,5 @@
 import { networkFetch } from "@/utils/httpClient";
+import { getUserAuthToken } from "@/services/userAuthService";
 import { useAuthStore } from "@/stores/authStore";
 import {
   ImportMode,
@@ -11,6 +12,19 @@ import {
  * Network Management Service
  * Handles network import/export operations
  */
+const buildAdminHeaders = (agentId?: string, secret?: string): HeadersInit => {
+  const headers: HeadersInit = {};
+  const token = getUserAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  if (agentId && secret) {
+    headers["X-Agent-ID"] = agentId;
+    headers["X-Agent-Secret"] = secret;
+  }
+  return headers;
+};
+
 class NetworkManagementService {
   /**
    * Get the current network connection info
@@ -49,12 +63,7 @@ class NetworkManagementService {
     const queryString = params.toString();
     const endpoint = `/api/network/export${queryString ? `?${queryString}` : ""}`;
 
-    // Build headers with authentication
-    const headers: HeadersInit = {};
-    if (agentId && secret) {
-      headers["X-Agent-ID"] = agentId;
-      headers["X-Agent-Secret"] = secret;
-    }
+    const headers = buildAdminHeaders(agentId, secret);
 
     const response = await networkFetch(host, port, endpoint, {
       method: "GET",
@@ -89,12 +98,7 @@ class NetworkManagementService {
     const protocol = useHttps ? "https" : "http";
     const url = `${protocol}://${host}:${port}/api/network/import/validate`;
 
-    // Build headers with authentication
-    const headers: HeadersInit = {};
-    if (agentId && secret) {
-      headers["X-Agent-ID"] = agentId;
-      headers["X-Agent-Secret"] = secret;
-    }
+    const headers = buildAdminHeaders(agentId, secret);
 
     const response = await fetch(url, {
       method: "POST",
@@ -136,12 +140,7 @@ class NetworkManagementService {
     const protocol = useHttps ? "https" : "http";
     const url = `${protocol}://${host}:${port}/api/network/import/apply`;
 
-    // Build headers with authentication
-    const headers: HeadersInit = {};
-    if (agentId && secret) {
-      headers["X-Agent-ID"] = agentId;
-      headers["X-Agent-Secret"] = secret;
-    }
+    const headers = buildAdminHeaders(agentId, secret);
 
     const response = await fetch(url, {
       method: "POST",

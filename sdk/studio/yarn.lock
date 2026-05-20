@@ -890,6 +890,30 @@
   resolved "https://registry.npmjs.org/@bcoe/v8-coverage/-/v8-coverage-0.2.3.tgz"
   integrity sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==
 
+"@bytecloud/cloud-api-config@^0.23.0":
+  version "0.23.0"
+  resolved "https://bnpm.byted.org/@bytecloud/cloud-api-config/-/cloud-api-config-0.23.0.tgz"
+  integrity sha512-q5Unk0HcrOHqreg82X/148ybhA0VMFK6Rfw54CgBLqkYETX3xFgNtNnisrV4xsXVqY0YqKTZ3G7/hMdXdQhIRg==
+
+"@bytecloud/common-lib@^7.53.1":
+  version "7.53.1"
+  resolved "https://bnpm.byted.org/@bytecloud/common-lib/-/common-lib-7.53.1.tgz"
+  integrity sha512-K9SPHLgdNT4giWyS/W+2zKSo3yTgWk2cpgX89usJhwWj4xKcuukxrfdxdv7LMPz3rPcCM/rWiE3rJrTxNqmM0w==
+  dependencies:
+    "@bytecloud/cloud-api-config" "^0.23.0"
+    "@bytecloud/core-lib" "^1.14.3"
+    axios "^1.13.2"
+    byted-tea-sdk "^5.0.40"
+    lodash "^4.17.21"
+
+"@bytecloud/core-lib@^1.14.3":
+  version "1.14.3"
+  resolved "https://bnpm.byted.org/@bytecloud/core-lib/-/core-lib-1.14.3.tgz"
+  integrity sha512-5oSg37Cr3NWvdxb6VYGmHa8AA3ARazHBW0X6FnBHpWeJWENHCameeCbV/reVIyB1bFdibWZTn8GzGblyfyg/Ug==
+  dependencies:
+    eventemitter3 "^5.0.1"
+    lodash "^4.17.21"
+
 "@craco/craco@^7.1.0":
   version "7.1.0"
   resolved "https://registry.npmjs.org/@craco/craco/-/craco-7.1.0.tgz"
@@ -1951,6 +1975,13 @@
   dependencies:
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
+
+"@platform-fe/localforage@1.9.7":
+  version "1.9.7"
+  resolved "https://bnpm.byted.org/@platform-fe/localforage/-/localforage-1.9.7.tgz"
+  integrity sha1-jeKNmMb0liU09swvO2Nn2D1GSHI=
+  dependencies:
+    lie "3.1.1"
 
 "@pmmmwh/react-refresh-webpack-plugin@^0.5.3":
   version "0.5.16"
@@ -4302,12 +4333,10 @@
   dependencies:
     "@types/ms" "*"
 
-"@types/diff@^8.0.0":
-  version "8.0.0"
-  resolved "https://registry.npmmirror.com/@types/diff/-/diff-8.0.0.tgz"
-  integrity sha512-o7jqJM04gfaYrdCecCVMbZhNdG6T1MHg/oQoRFdERLV+4d+V7FijhiEAbFu0Usww84Yijk9yH58U4Jk4HbtzZw==
-  dependencies:
-    diff "*"
+"@types/diff@^5.2.3":
+  version "5.2.3"
+  resolved "https://bnpm.byted.org/@types/diff/-/diff-5.2.3.tgz"
+  integrity sha512-K0Oqlrq3kQMaO2RhfrNQX5trmt+XLyom88zS0u84nnIcLvFnRUMRRHmrGny5GSM+kNO9IZLARsdQHDzkhAgmrQ==
 
 "@types/dompurify@^3.2.0":
   version "3.2.0"
@@ -5583,6 +5612,14 @@ builtin-modules@^3.1.0:
   resolved "https://registry.npmjs.org/builtin-modules/-/builtin-modules-3.3.0.tgz"
   integrity sha512-zhaCDicdLuWN5UbN5IMnFqNMhNfo919sH85y2/ea+5Yg9TsTkeZxpL+JLbp6cgYFS4sRLp3YV4S6yDuqVWHYOw==
 
+byted-tea-sdk@^5.0.40:
+  version "5.3.10"
+  resolved "https://bnpm.byted.org/byted-tea-sdk/-/byted-tea-sdk-5.3.10.tgz"
+  integrity sha512-4EsWJWRGrvjzX/aMOBEZ7vZ+CM6aMn+dIEgErdpK0CN2OTT9siNVZYgOBh4Xy53JAEbtlAcZwj47azScXhM3hA==
+  dependencies:
+    "@platform-fe/localforage" "1.9.7"
+    pako "^2.1.0"
+
 bytes@3.1.2:
   version "3.1.2"
   resolved "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz"
@@ -6543,7 +6580,7 @@ diff-sequences@^27.5.1:
   resolved "https://registry.npmjs.org/diff-sequences/-/diff-sequences-27.5.1.tgz"
   integrity sha512-k1gCAXAsNgLwEL+Y8Wvl+M6oEFj5bgazfZULpS5CneoPPXRaCCW7dm+q21Ky2VEE5X+VeRDBVg1Pcvvsr4TtNQ==
 
-diff@*, diff@^4.0.1:
+diff@^4.0.1:
   version "4.0.2"
   resolved "https://registry.npmjs.org/diff/-/diff-4.0.2.tgz"
   integrity sha512-58lmxKSA4BNyLz+HHMUzlOEpg09FV+ev6ZMe3vJihgdxzgcwZ8VoEEPmALCZG9LmqfVoNMMKpttIYTVG6uDY7A==
@@ -7285,9 +7322,9 @@ eventemitter3@^4.0.0:
   integrity sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw==
 
 eventemitter3@^5.0.1:
-  version "5.0.1"
-  resolved "https://registry.npmjs.org/eventemitter3/-/eventemitter3-5.0.1.tgz"
-  integrity sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA==
+  version "5.0.4"
+  resolved "https://bnpm.byted.org/eventemitter3/-/eventemitter3-5.0.4.tgz"
+  integrity sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==
 
 events@^3.2.0, events@^3.3.0:
   version "3.3.0"
@@ -8358,6 +8395,11 @@ ignore@^5.2.0:
   version "5.3.2"
   resolved "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz"
   integrity sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==
+
+immediate@~3.0.5:
+  version "3.0.6"
+  resolved "https://bnpm.byted.org/immediate/-/immediate-3.0.6.tgz"
+  integrity sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ==
 
 immer@^10.1.1:
   version "10.2.0"
@@ -9525,6 +9567,13 @@ lib0@^0.2.102, lib0@^0.2.114, lib0@^0.2.43, lib0@^0.2.85, lib0@^0.2.99:
   dependencies:
     isomorphic.js "^0.2.4"
 
+lie@3.1.1:
+  version "3.1.1"
+  resolved "https://bnpm.byted.org/lie/-/lie-3.1.1.tgz"
+  integrity sha512-RiNhHysUjhrDQntfYSfY4MU24coXXdEOgw9WGcKHNeEwffDYbF//u87M1EWaMGzuFoSbqW0C9C6lEEhDOAswfw==
+  dependencies:
+    immediate "~3.0.5"
+
 lightningcss-linux-x64-gnu@1.31.1:
   version "1.31.1"
   resolved "https://registry.npmjs.org/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.31.1.tgz"
@@ -10679,6 +10728,11 @@ p-try@^2.0.0:
   version "2.2.0"
   resolved "https://registry.npmjs.org/p-try/-/p-try-2.2.0.tgz"
   integrity sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==
+
+pako@^2.1.0:
+  version "2.1.0"
+  resolved "https://bnpm.byted.org/pako/-/pako-2.1.0.tgz"
+  integrity sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==
 
 param-case@^3.0.4:
   version "3.0.4"

@@ -8,8 +8,11 @@ agent registry, and mod-specific storage using SQLite and structured directories
 import logging
 import os
 import json
+import re
+import secrets
 import sqlite3
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +20,7 @@ from typing import Dict, Any, List, Optional, Union
 from contextlib import contextmanager
 
 from openagents.models.event import Event
+from openagents.utils.password_utils import verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +130,97 @@ class WorkspaceManager:
             """
             )
 
+            # User-owned local agents and private channels
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    display_name TEXT,
+                    password_hash TEXT DEFAULT '',
+                    auth_provider TEXT DEFAULT 'bytedance',
+                    external_id TEXT,
+                    username TEXT,
+                    raw_profile TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    revoked BOOLEAN DEFAULT FALSE,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_agents (
+                    user_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    agent_type TEXT NOT NULL,
+                    config TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, agent_id),
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_channels (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    channel_name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    created_at REAL NOT NULL,
+                    UNIQUE (user_id, name),
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_agent_channels (
+                    user_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, agent_id, channel_id),
+                    FOREIGN KEY (user_id, agent_id) REFERENCES user_agents (user_id, agent_id),
+                    FOREIGN KEY (channel_id) REFERENCES user_channels (id)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_agent_connect_tokens (
+                    token TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    used_at REAL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (user_id, agent_id) REFERENCES user_agents (user_id, agent_id)
+                )
+            """
+            )
+
+            # Migrate existing user tables from the previous local-password shape.
+            self._ensure_column(cursor, "users", "auth_provider", "TEXT DEFAULT 'bytedance'")
+            self._ensure_column(cursor, "users", "external_id", "TEXT")
+            self._ensure_column(cursor, "users", "username", "TEXT")
+            self._ensure_column(cursor, "users", "raw_profile", "TEXT")
+            self._ensure_column(cursor, "users", "updated_at", "REAL")
+
             # Create indexes for performance
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)"
@@ -142,9 +237,30 @@ class WorkspaceManager:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_queue_status ON event_queue(status)"
             )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider_external_id ON users(auth_provider, external_id) WHERE external_id IS NOT NULL"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_channels_user ON user_channels(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_connect_tokens_user_agent ON user_agent_connect_tokens(user_id, agent_id)"
+            )
 
             conn.commit()
             logger.debug("Database schema initialized successfully")
+
+    def _ensure_column(self, cursor, table: str, column: str, definition: str) -> None:
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = {row["name"] for row in cursor.fetchall()}
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @contextmanager
     def _get_db_connection(self):
@@ -155,6 +271,449 @@ class WorkspaceManager:
             yield conn
         finally:
             conn.close()
+
+
+    def _now(self) -> float:
+        return time.time()
+
+    def _row_to_dict(self, row) -> Optional[Dict[str, Any]]:
+        return dict(row) if row else None
+
+    def _normalize_email(self, email: str) -> str:
+        return (email or "").strip().lower()
+
+    def _public_user(self, user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not user:
+            return None
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user.get("display_name"),
+            "auth_provider": user.get("auth_provider"),
+            "external_id": user.get("external_id"),
+            "username": user.get("username"),
+            "created_at": user.get("created_at"),
+        }
+
+    def create_user(self, email: str, password: str, display_name: Optional[str] = None) -> Dict[str, Any]:
+        """Local password users are disabled; use ByteDance SSO instead."""
+        raise ValueError("local password auth is disabled; use ByteDance SSO")
+
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE email = ?", (self._normalize_email(email),))
+            return self._row_to_dict(cursor.fetchone())
+
+    def get_user_by_provider_external_id(self, provider: str, external_id: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM users WHERE auth_provider = ? AND external_id = ?",
+                ((provider or "").strip().lower(), str(external_id or "").strip()),
+            )
+            return self._row_to_dict(cursor.fetchone())
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            return self._row_to_dict(cursor.fetchone())
+
+    def upsert_sso_user(self, provider: str, external_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._initialized:
+            raise RuntimeError("Workspace not initialized")
+        provider = (provider or "").strip().lower()
+        external_id = str(external_id or "").strip()
+        profile = profile or {}
+        if not provider:
+            raise ValueError("auth provider is required")
+        if not external_id:
+            raise ValueError("external user id is required")
+
+        username = str(
+            profile.get("username")
+            or profile.get("preferred_username")
+            or external_id
+        ).strip()
+        email = self._normalize_email(str(profile.get("email") or ""))
+        if not email and provider == "bytedance" and username and "@" not in username:
+            email = self._normalize_email(f"{username}@bytedance.com")
+        if not email:
+            raise ValueError("email is required")
+        display_name = (
+            profile.get("display_name")
+            or profile.get("name")
+            or username
+            or email.split("@", 1)[0]
+        )
+        raw_profile = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+        now = self._now()
+
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM users WHERE auth_provider = ? AND external_id = ?",
+                (provider, external_id),
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+                existing = cursor.fetchone()
+
+            if existing:
+                user_id = existing["id"]
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET email = ?, display_name = ?, auth_provider = ?, external_id = ?,
+                        username = ?, raw_profile = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (email, display_name, provider, external_id, username, raw_profile, now, user_id),
+                )
+            else:
+                user_id = str(uuid.uuid4())
+                cursor.execute(
+                    """
+                    INSERT INTO users (
+                        id, email, display_name, password_hash, auth_provider,
+                        external_id, username, raw_profile, created_at, updated_at
+                    ) VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (user_id, email, display_name, provider, external_id, username, raw_profile, now, now),
+                )
+            conn.commit()
+        user = self.get_user_by_provider_external_id(provider, external_id)
+        if not user:
+            raise RuntimeError("failed to load SSO user after upsert")
+        return user
+
+    def verify_user_password(self, email: str, password: str) -> bool:
+        user = self.get_user_by_email(email)
+        if not user or not user.get("password_hash"):
+            return False
+        return verify_password(password, user.get("password_hash"))
+
+    def create_user_session(self, user_id: str, ttl_seconds: int = 86400) -> Dict[str, Any]:
+        if not self._initialized:
+            raise RuntimeError("Workspace not initialized")
+        token = secrets.token_urlsafe(32)
+        now = self._now()
+        session = {
+            "token": token,
+            "user_id": user_id,
+            "expires_at": now + ttl_seconds,
+            "created_at": now,
+        }
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO user_sessions (token, user_id, expires_at, revoked, created_at)
+                VALUES (?, ?, ?, FALSE, ?)
+                """,
+                (token, user_id, session["expires_at"], session["created_at"]),
+            )
+            conn.commit()
+        return session
+
+    def get_user_by_session(self, token: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized or not token:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT users.* FROM user_sessions
+                JOIN users ON users.id = user_sessions.user_id
+                WHERE user_sessions.token = ?
+                  AND user_sessions.revoked = FALSE
+                  AND user_sessions.expires_at > ?
+                """,
+                (token, self._now()),
+            )
+            return self._row_to_dict(cursor.fetchone())
+
+    def revoke_user_session(self, token: str) -> bool:
+        if not self._initialized or not token:
+            return False
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE user_sessions SET revoked = TRUE WHERE token = ?", (token,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def save_user_agent(self, user_id: str, agent_id: str, agent_type: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self._initialized:
+            raise RuntimeError("Workspace not initialized")
+        if not agent_id:
+            raise ValueError("agent_id is required")
+        now = self._now()
+        config_json = json.dumps(config or {})
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO user_agents (user_id, agent_id, agent_type, config, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, agent_id) DO UPDATE SET
+                    agent_type = excluded.agent_type,
+                    config = excluded.config,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, agent_id, agent_type or "agent", config_json, now, now),
+            )
+            conn.commit()
+        return {"user_id": user_id, "agent_id": agent_id, "agent_type": agent_type or "agent", "config": config or {}}
+
+    def list_user_agents(self, user_id: str) -> List[Dict[str, Any]]:
+        if not self._initialized:
+            return []
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM user_agents WHERE user_id = ? ORDER BY created_at", (user_id,))
+            rows = cursor.fetchall()
+        agents = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["config"] = json.loads(item.get("config") or "{}")
+            except json.JSONDecodeError:
+                item["config"] = {}
+            agents.append(item)
+        return agents
+
+    def delete_user_agent(self, user_id: str, agent_id: str) -> bool:
+        if not self._initialized:
+            return False
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM user_agent_channels WHERE user_id = ? AND agent_id = ?",
+                (user_id, agent_id),
+            )
+            cursor.execute(
+                "DELETE FROM user_agents WHERE user_id = ? AND agent_id = ?",
+                (user_id, agent_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def _channel_slug(self, name: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9_]+", "_", (name or "").strip().lower()).strip("_")
+        return slug or "channel"
+
+    def _private_channel_name(self, user_id: str, name: str) -> str:
+        return f"u_{user_id.replace('-', '')[:12]}_{self._channel_slug(name)}"
+
+    def create_user_channel(self, user_id: str, name: str, description: str = "") -> Dict[str, Any]:
+        if not self._initialized:
+            raise RuntimeError("Workspace not initialized")
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("channel name is required")
+        now = self._now()
+        channel = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "name": clean_name,
+            "channel_name": self._private_channel_name(user_id, clean_name),
+            "description": description or "",
+            "created_at": now,
+        }
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO user_channels (id, user_id, name, channel_name, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    channel["id"],
+                    user_id,
+                    channel["name"],
+                    channel["channel_name"],
+                    channel["description"],
+                    channel["created_at"],
+                ),
+            )
+            conn.commit()
+        return channel
+
+    def list_user_channels(self, user_id: str) -> List[Dict[str, Any]]:
+        if not self._initialized:
+            return []
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM user_channels WHERE user_id = ? ORDER BY created_at", (user_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def list_all_user_channels(self) -> List[Dict[str, Any]]:
+        if not self._initialized:
+            return []
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM user_channels ORDER BY created_at")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_channel(self, user_id: str, channel_id: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM user_channels WHERE user_id = ? AND id = ?",
+                (user_id, channel_id),
+            )
+            return self._row_to_dict(cursor.fetchone())
+
+    def get_user_channel_by_internal_name(self, channel_name: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM user_channels WHERE channel_name = ?", (channel_name,))
+            return self._row_to_dict(cursor.fetchone())
+
+    def bind_user_agent_channel(self, user_id: str, agent_id: str, channel_id: str) -> bool:
+        if not self._initialized:
+            return False
+        now = self._now()
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM user_agents WHERE user_id = ? AND agent_id = ?",
+                (user_id, agent_id),
+            )
+            if not cursor.fetchone():
+                return False
+            cursor.execute(
+                "SELECT 1 FROM user_channels WHERE user_id = ? AND id = ?",
+                (user_id, channel_id),
+            )
+            if not cursor.fetchone():
+                return False
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO user_agent_channels (user_id, agent_id, channel_id, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, agent_id, channel_id, now),
+            )
+            conn.commit()
+            return True
+
+    def set_user_agent_channels(self, user_id: str, agent_id: str, channel_ids: List[str]) -> bool:
+        if not self._initialized:
+            return False
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM user_agent_channels WHERE user_id = ? AND agent_id = ?",
+                (user_id, agent_id),
+            )
+            for channel_id in channel_ids or []:
+                cursor.execute(
+                    "SELECT 1 FROM user_channels WHERE user_id = ? AND id = ?",
+                    (user_id, channel_id),
+                )
+                if cursor.fetchone():
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO user_agent_channels (user_id, agent_id, channel_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (user_id, agent_id, channel_id, self._now()),
+                    )
+            conn.commit()
+        return True
+
+    def list_user_agent_channel_names(self, user_id: str, agent_id: str) -> List[str]:
+        if not self._initialized:
+            return []
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT c.channel_name FROM user_agent_channels ac
+                JOIN user_channels c ON c.id = ac.channel_id
+                WHERE ac.user_id = ? AND ac.agent_id = ?
+                ORDER BY c.created_at
+                """,
+                (user_id, agent_id),
+            )
+            return [row["channel_name"] for row in cursor.fetchall()]
+
+    def is_user_agent_bound_to_channel(self, user_id: str, agent_id: str, channel_name: str) -> bool:
+        if not self._initialized:
+            return False
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT 1 FROM user_agent_channels ac
+                JOIN user_channels c ON c.id = ac.channel_id
+                WHERE ac.user_id = ? AND ac.agent_id = ? AND c.channel_name = ?
+                """,
+                (user_id, agent_id, channel_name),
+            )
+            return cursor.fetchone() is not None
+
+    def create_user_agent_connect_token(self, user_id: str, agent_id: str, ttl_seconds: int = 600) -> Dict[str, Any]:
+        if not self._initialized:
+            raise RuntimeError("Workspace not initialized")
+        token = secrets.token_urlsafe(32)
+        now = self._now()
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM user_agents WHERE user_id = ? AND agent_id = ?",
+                (user_id, agent_id),
+            )
+            if not cursor.fetchone():
+                raise ValueError("user agent not found")
+            cursor.execute(
+                """
+                INSERT INTO user_agent_connect_tokens (token, user_id, agent_id, expires_at, used_at, created_at)
+                VALUES (?, ?, ?, ?, NULL, ?)
+                """,
+                (token, user_id, agent_id, now + ttl_seconds, now),
+            )
+            conn.commit()
+        return {"token": token, "user_id": user_id, "agent_id": agent_id, "expires_at": now + ttl_seconds}
+
+    def consume_user_agent_connect_token(self, token: str, agent_id: str) -> Optional[Dict[str, Any]]:
+        if not self._initialized or not token or not agent_id:
+            return None
+        now = self._now()
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM user_agent_connect_tokens
+                WHERE token = ? AND agent_id = ? AND used_at IS NULL AND expires_at > ?
+                """,
+                (token, agent_id, now),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            cursor.execute(
+                "UPDATE user_agent_connect_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL",
+                (now, token),
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return None
+            conn.commit()
+            return dict(row)
 
     def get_mod_storage_path(self, mod_name: str) -> Path:
         """Get storage path for a specific mod.

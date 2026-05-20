@@ -520,6 +520,15 @@ async function cmdTestLLM(connector, _flags, positional) {
   }
 }
 
+async function cmdLocalApi(connector, flags) {
+  const port = parseInt(flags.port || process.env.OPENAGENTS_LOCAL_API_PORT || '45555', 10);
+  const server = connector.createLocalApiServer({ port });
+  await server.start();
+  print(`Local API listening on http://127.0.0.1:${server.port}`);
+  print(`Pairing token: ${connector.getPairingToken()}`);
+  await new Promise(() => {});
+}
+
 async function cmdVersion() {
   const pkg = require('../package.json');
   print(`${pkg.name} v${pkg.version}`);
@@ -574,6 +583,7 @@ Commands:
   workspace join <token>      Join workspace with token
   workspace list              List configured workspaces
   mcp-server                  Start MCP server (stdio) for workspace tools
+  local-api [--port N]        Start loopback API for Studio pairing
   update                      Upgrade launcher to the latest npm release
   version                     Show version
   help                        Show this help
@@ -655,6 +665,7 @@ async function main() {
     'tool-mode': () => cmdToolMode(connector, flags, positional),
     'test-llm': () => cmdTestLLM(connector, flags, positional),
     update: () => cmdUpdate(),
+    'local-api': () => cmdLocalApi(connector, flags),
     'mcp-server': () => {
       const { runMcpServer } = require('./mcp-server');
       const workspaceId = flags['workspace-id'] || process.env.OPENAGENTS_WORKSPACE_ID;

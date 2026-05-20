@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import sqlite3
 import time
 import html
 import base64
@@ -61,6 +62,8 @@ from openagents.models.a2a import (
 )
 from openagents.sdk.a2a_task_store import TaskStore, InMemoryTaskStore
 from openagents.models.external_access import ExternalAccessConfig
+from openagents.utils.bytecloud_jwt import ByteCloudJwtError, ByteCloudJwtVerifier, claims_to_sso_profile
+from openagents.utils.admin_auth import is_hardcoded_admin_user
 from openagents.utils.a2a_converters import (
     A2ATaskEventNames,
     a2a_message_to_event,
@@ -157,6 +160,14 @@ class HttpTransport(Transport):
         self._listen_host: str = "0.0.0.0"
         self._listen_port: int = 8080
 
+        self._bytecloud_jwt_verifier = ByteCloudJwtVerifier(
+            domain_id=self.config.get(
+                "bytecloud_domain_id",
+                os.getenv("OPENAGENTS_BYTECLOUD_DOMAIN", "online"),
+            ),
+            jwks_url=self.config.get("bytecloud_jwks_url") or os.getenv("OPENAGENTS_BYTECLOUD_JWKS_URL"),
+        )
+
         self.setup_routes()
 
     def setup_routes(self):
@@ -165,15 +176,27 @@ class HttpTransport(Transport):
         self.app.router.add_get("/", self.root_handler)
         # Add both /health and /api/health for compatibility
         self.app.router.add_get("/api/health", self.health_check)
+        self.app.router.add_post("/api/auth/signup", self.auth_signup)
+        self.app.router.add_post("/api/auth/login", self.auth_login)
+        self.app.router.add_post("/api/auth/bytedance-jwt", self.auth_bytedance_jwt)
+        self.app.router.add_post("/api/auth/logout", self.auth_logout)
+        self.app.router.add_get("/api/auth/me", self.auth_me)
+        self.app.router.add_get("/api/user/agents", self.list_user_agents)
+        self.app.router.add_post("/api/user/agents", self.save_user_agent)
+        self.app.router.add_put("/api/user/agents/{agent_id}", self.update_user_agent)
+        self.app.router.add_delete("/api/user/agents/{agent_id}", self.delete_user_agent)
+        self.app.router.add_post("/api/user/agents/{agent_id}/connect-token", self.create_user_agent_connect_token)
+        self.app.router.add_get("/api/user/channels", self.list_user_channels)
+        self.app.router.add_post("/api/user/channels", self.create_user_channel)
         self.app.router.add_post("/api/register", self.register_agent)
         self.app.router.add_post("/api/unregister", self.unregister_agent)
         self.app.router.add_get("/api/poll", self.poll_messages)
         self.app.router.add_post("/api/send_event", self.send_message)
 
         # Network management endpoints (admin only)
-        self.app.router.add_get("/api/network/export", self.export_network)
-        self.app.router.add_post("/api/network/import/validate", self.validate_import)
-        self.app.router.add_post("/api/network/import/apply", self.apply_import)
+        self.app.router.add_get("/api/network/export", self._admin_route(self.export_network))
+        self.app.router.add_post("/api/network/import/validate", self._admin_route(self.validate_import))
+        self.app.router.add_post("/api/network/import/apply", self._admin_route(self.apply_import))
 
         # Network initialization endpoints (only work when network is not initialized)
         self.app.router.add_post("/api/network/initialize/admin-password", self.initialize_admin_password)
@@ -182,39 +205,39 @@ class HttpTransport(Transport):
         self.app.router.add_get("/api/templates", self.list_templates)
 
         # Admin default model configuration endpoints
-        self.app.router.add_get("/api/admin/default-model", self.get_default_model)
-        self.app.router.add_post("/api/admin/default-model", self.save_default_model)
-        self.app.router.add_delete("/api/admin/default-model", self.delete_default_model)
-        self.app.router.add_post("/api/admin/default-model/test", self.test_default_model)
+        self.app.router.add_get("/api/admin/default-model", self._admin_route(self.get_default_model))
+        self.app.router.add_post("/api/admin/default-model", self._admin_route(self.save_default_model))
+        self.app.router.add_delete("/api/admin/default-model", self._admin_route(self.delete_default_model))
+        self.app.router.add_post("/api/admin/default-model/test", self._admin_route(self.test_default_model))
         
         # Mod settings endpoints
-        self.app.router.add_get("/api/admin/mods", self.get_mods)
-        self.app.router.add_get("/api/admin/mods/{mod_id}/config", self.get_mod_config)
-        self.app.router.add_get("/api/admin/mods/{mod_id}/schema", self.get_mod_schema)
-        self.app.router.add_put("/api/admin/mods/{mod_id}/config", self.update_mod_config)
-        self.app.router.add_post("/api/admin/network/restart", self.restart_network)
+        self.app.router.add_get("/api/admin/mods", self._admin_route(self.get_mods))
+        self.app.router.add_get("/api/admin/mods/{mod_id}/config", self._admin_route(self.get_mod_config))
+        self.app.router.add_get("/api/admin/mods/{mod_id}/schema", self._admin_route(self.get_mod_schema))
+        self.app.router.add_put("/api/admin/mods/{mod_id}/config", self._admin_route(self.update_mod_config))
+        self.app.router.add_post("/api/admin/network/restart", self._admin_route(self.restart_network))
         # LLM Logs API endpoints
-        self.app.router.add_get("/api/agents/service/{agent_id}/llm-logs", self.get_llm_logs)
-        self.app.router.add_get("/api/agents/service/{agent_id}/llm-logs/{log_id}", self.get_llm_log_entry)
+        self.app.router.add_get("/api/agents/service/{agent_id}/llm-logs", self._admin_route(self.get_llm_logs))
+        self.app.router.add_get("/api/agents/service/{agent_id}/llm-logs/{log_id}", self._admin_route(self.get_llm_log_entry))
 
         # Cache file upload/download endpoints
         self.app.router.add_post("/api/cache/upload", self.cache_upload)
         self.app.router.add_get("/api/cache/download/{cache_id}", self.cache_download)
         self.app.router.add_get("/api/cache/info/{cache_id}", self.cache_info)
         # Agent management endpoints
-        self.app.router.add_get("/api/agents/service", self.get_service_agents)
-        self.app.router.add_post("/api/agents/service/{agent_id}/start", self.start_service_agent)
-        self.app.router.add_post("/api/agents/service/{agent_id}/stop", self.stop_service_agent)
-        self.app.router.add_post("/api/agents/service/{agent_id}/restart", self.restart_service_agent)
-        self.app.router.add_get("/api/agents/service/{agent_id}/status", self.get_service_agent_status)
-        self.app.router.add_get("/api/agents/service/{agent_id}/logs/screen", self.get_service_agent_logs)
-        self.app.router.add_get("/api/agents/service/{agent_id}/source", self.get_service_agent_source)
-        self.app.router.add_put("/api/agents/service/{agent_id}/source", self.save_service_agent_source)
-        self.app.router.add_get("/api/agents/service/{agent_id}/env", self.get_service_agent_env)
-        self.app.router.add_put("/api/agents/service/{agent_id}/env", self.save_service_agent_env)
+        self.app.router.add_get("/api/agents/service", self._admin_route(self.get_service_agents))
+        self.app.router.add_post("/api/agents/service/{agent_id}/start", self._admin_route(self.start_service_agent))
+        self.app.router.add_post("/api/agents/service/{agent_id}/stop", self._admin_route(self.stop_service_agent))
+        self.app.router.add_post("/api/agents/service/{agent_id}/restart", self._admin_route(self.restart_service_agent))
+        self.app.router.add_get("/api/agents/service/{agent_id}/status", self._admin_route(self.get_service_agent_status))
+        self.app.router.add_get("/api/agents/service/{agent_id}/logs/screen", self._admin_route(self.get_service_agent_logs))
+        self.app.router.add_get("/api/agents/service/{agent_id}/source", self._admin_route(self.get_service_agent_source))
+        self.app.router.add_put("/api/agents/service/{agent_id}/source", self._admin_route(self.save_service_agent_source))
+        self.app.router.add_get("/api/agents/service/{agent_id}/env", self._admin_route(self.get_service_agent_env))
+        self.app.router.add_put("/api/agents/service/{agent_id}/env", self._admin_route(self.save_service_agent_env))
         # Global environment variables for all service agents
-        self.app.router.add_get("/api/agents/service/env/global", self.get_global_env)
-        self.app.router.add_put("/api/agents/service/env/global", self.save_global_env)
+        self.app.router.add_get("/api/agents/service/env/global", self._admin_route(self.get_global_env))
+        self.app.router.add_put("/api/agents/service/env/global", self._admin_route(self.save_global_env))
 
         # Assets upload endpoint
         self.app.router.add_post("/api/assets/upload", self.upload_asset)
@@ -285,7 +308,7 @@ class HttpTransport(Transport):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization, Accept, Mcp-Session-Id"
+            "Content-Type, Authorization, Accept, Mcp-Session-Id, X-Jwt-Token"
         )
         response.headers["Access-Control-Max-Age"] = "86400"  # 24 hours
 
@@ -698,12 +721,223 @@ class HttpTransport(Transport):
 
         return web.Response(text=html_content, content_type='text/html')
 
+
+    def _workspace_manager(self):
+        return getattr(self.network_instance, "workspace_manager", None)
+
+    def _bearer_token(self, request) -> Optional[str]:
+        header = request.headers.get("Authorization", "")
+        if header.lower().startswith("bearer "):
+            return header.split(" ", 1)[1].strip()
+        return None
+
+    def _public_user(self, user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not user:
+            return None
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user.get("display_name"),
+            "auth_provider": user.get("auth_provider"),
+            "external_id": user.get("external_id"),
+            "username": user.get("username"),
+            "created_at": user.get("created_at"),
+        }
+
+    async def _request_json(self, request) -> Dict[str, Any]:
+        try:
+            return await request.json()
+        except Exception:
+            return {}
+
+    def _bytecloud_jwt_from_request(self, request, data: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        data = data or {}
+        token = data.get("jwt") or data.get("token") or request.headers.get("x-jwt-token")
+        if token:
+            return str(token).strip()
+        return self._bearer_token(request)
+
+    def _auth_user_sync(self, request) -> Optional[Dict[str, Any]]:
+        manager = self._workspace_manager()
+        if not manager:
+            return None
+        return manager.get_user_by_session(self._bearer_token(request))
+
+    async def _auth_user(self, request) -> Optional[Dict[str, Any]]:
+        return self._auth_user_sync(request)
+
+    def _admin_route(self, handler):
+        async def wrapped(request):
+            if not self._require_admin(request):
+                return web.json_response(
+                    {"success": False, "error_message": "Admin access requires yangshan.andy ByteDance SSO"},
+                    status=403,
+                )
+            return await handler(request)
+
+        return wrapped
+
+    def _auth_error(self):
+        return web.json_response({"success": False, "error_message": "authentication required"}, status=401)
+
+    async def auth_signup(self, request):
+        return web.json_response(
+            {
+                "success": False,
+                "error_message": "local password signup is disabled; use ByteDance SSO",
+            },
+            status=410,
+        )
+
+    async def auth_login(self, request):
+        return web.json_response(
+            {
+                "success": False,
+                "error_message": "local password login is disabled; use ByteDance SSO",
+            },
+            status=410,
+        )
+
+    async def auth_bytedance_jwt(self, request):
+        manager = self._workspace_manager()
+        if not manager:
+            return web.json_response({"success": False, "error_message": "workspace is not enabled"}, status=500)
+
+        data = await self._request_json(request)
+        token = self._bytecloud_jwt_from_request(request, data)
+        if not token:
+            return web.json_response({"success": False, "error_message": "ByteCloud JWT is required"}, status=400)
+
+        try:
+            claims = self._bytecloud_jwt_verifier.verify(token)
+            profile = claims_to_sso_profile(claims)
+            external_id = profile.get("username") or claims.get("sub") or claims.get("uuid") or profile.get("email")
+            user = manager.upsert_sso_user("bytedance", str(external_id), profile)
+            session = manager.create_user_session(user["id"])
+            return web.json_response({"success": True, "token": session["token"], "user": self._public_user(user)})
+        except ByteCloudJwtError as e:
+            return web.json_response({"success": False, "error_message": str(e)}, status=401)
+        except Exception as e:
+            return web.json_response({"success": False, "error_message": str(e)}, status=400)
+
+    async def auth_logout(self, request):
+        manager = self._workspace_manager()
+        token = self._bearer_token(request)
+        if manager and token:
+            manager.revoke_user_session(token)
+        return web.json_response({"success": True})
+
+    async def auth_me(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        return web.json_response({"success": True, "user": self._public_user(user)})
+
+    async def list_user_agents(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        manager = self._workspace_manager()
+        return web.json_response({"success": True, "agents": manager.list_user_agents(user["id"])})
+
+    async def save_user_agent(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        data = await request.json()
+        manager = self._workspace_manager()
+        agent_id = data.get("agent_id") or data.get("name")
+        agent_type = data.get("agent_type") or data.get("type") or "agent"
+        config = data.get("config") or {}
+        if data.get("display_name"):
+            config["display_name"] = data.get("display_name")
+        agent = manager.save_user_agent(user["id"], agent_id, agent_type, config)
+        channel_ids = data.get("channel_ids") or []
+        manager.set_user_agent_channels(user["id"], agent_id, channel_ids)
+        agent["channels"] = manager.list_user_agent_channel_names(user["id"], agent_id)
+        return web.json_response({"success": True, "agent": agent})
+
+    async def update_user_agent(self, request):
+        return await self.save_user_agent(request)
+
+    async def delete_user_agent(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        agent_id = request.match_info.get("agent_id")
+        success = self._workspace_manager().delete_user_agent(user["id"], agent_id)
+        return web.json_response({"success": success})
+
+    async def create_user_agent_connect_token(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        agent_id = request.match_info.get("agent_id")
+        manager = self._workspace_manager()
+        token = manager.create_user_agent_connect_token(user["id"], agent_id)
+        token["channels"] = manager.list_user_agent_channel_names(user["id"], agent_id)
+        return web.json_response({"success": True, "connect_token": token})
+
+    async def list_user_channels(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        channels = self._workspace_manager().list_user_channels(user["id"])
+        return web.json_response({"success": True, "channels": channels})
+
+    async def create_user_channel(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        data = await request.json()
+        manager = self._workspace_manager()
+        try:
+            channel = manager.create_user_channel(user["id"], data.get("name", ""), data.get("description", ""))
+            if self.network_instance:
+                mods = getattr(self.network_instance, "mods", {}) or {}
+                mod_values = mods.values() if isinstance(mods, dict) else mods
+                for mod in mod_values:
+                    create_channel = getattr(mod, "_create_channel", None)
+                    if callable(create_channel):
+                        try:
+                            create_channel(
+                                channel["channel_name"],
+                                channel.get("description") or channel["name"],
+                                visibility="private",
+                                owner_user_id=user["id"],
+                            )
+                        except TypeError:
+                            pass
+            return web.json_response({"success": True, "channel": channel})
+        except sqlite3.IntegrityError:
+            return web.json_response({"success": False, "error_message": "channel already exists"}, status=409)
+        except Exception as e:
+            return web.json_response({"success": False, "error_message": str(e)}, status=400)
+
     async def register_agent(self, request):
         """Handle agent registration via HTTP."""
         try:
             data = await request.json()
             agent_id = data.get("agent_id")
-            metadata = data.get("metadata", {})
+            metadata = data.get("metadata", {}) or {}
+            manager = self._workspace_manager()
+            owner_token = data.get("owner_connect_token") or metadata.get("owner_connect_token")
+
+            if manager and owner_token and agent_id:
+                owner = manager.consume_user_agent_connect_token(owner_token, agent_id)
+                if not owner:
+                    return web.json_response(
+                        {"success": False, "error_message": "invalid or expired owner_connect_token"},
+                        status=401,
+                    )
+                metadata["owner_user_id"] = owner["user_id"]
+                metadata["private_channels"] = manager.list_user_agent_channel_names(owner["user_id"], agent_id)
+            elif manager:
+                user = await self._auth_user(request)
+                if user:
+                    metadata["owner_user_id"] = user["id"]
+
+            metadata.pop("owner_connect_token", None)
 
             if not agent_id:
                 return web.json_response(
@@ -996,16 +1230,17 @@ class HttpTransport(Transport):
         """Handle sending events/messages via HTTP."""
         try:
             data = await request.json()
+            event_data = data.get("event") if isinstance(data.get("event"), dict) else data
 
             # Extract event data similar to gRPC SendEvent
-            event_name = data.get("event_name")
-            source_id = data.get("source_id")
-            target_agent_id = data.get("target_agent_id")
-            payload = data.get("payload", {})
-            event_id = data.get("event_id")
-            metadata = data.get("metadata", {})
-            visibility = data.get("visibility", "network")
-            secret = data.get("secret")
+            event_name = event_data.get("event_name")
+            source_id = event_data.get("source_id")
+            target_agent_id = event_data.get("target_agent_id") or event_data.get("destination_id")
+            payload = event_data.get("payload", {})
+            event_id = event_data.get("event_id")
+            metadata = event_data.get("metadata", {})
+            visibility = event_data.get("visibility", "network")
+            secret = data.get("secret") or event_data.get("secret")
 
             if not event_name or not source_id:
                 return web.json_response(
@@ -3741,54 +3976,13 @@ class HttpTransport(Transport):
         return web.Response(status=404, text="Not found")
 
     def _require_admin(self, request) -> bool:
-        """Check if request is from an agent in the 'admin' group.
-
-        Validates agent credentials (X-Agent-ID and X-Agent-Secret headers)
-        and checks if the agent belongs to the 'admin' group.
-
-        This uses the same approach as SystemCommandProcessor._check_admin_access,
-        checking topology.agent_group_membership.
-
-        Args:
-            request: aiohttp request object
-        Returns:
-            bool: True if agent is in admin group, False otherwise
-        """
-        # return True
-        if not self.network_instance:
-            logger.warning("Admin check failed: network instance not available")
-            return False
-
-        # Extract agent credentials from headers
-        agent_id = request.headers.get('X-Agent-ID')
-        agent_secret = request.headers.get('X-Agent-Secret')
-
-        if not agent_id or not agent_secret:
-            logger.warning("Admin check failed: missing X-Agent-ID or X-Agent-Secret headers")
-            return False
-
-        # Validate agent secret
-        if hasattr(self.network_instance, 'secret_manager'):
-            if not self.network_instance.secret_manager.validate_secret(agent_id, agent_secret):
-                logger.warning(f"Admin check failed: invalid secret for agent {agent_id}")
-                return False
-        else:
-            logger.warning("Admin check failed: secret_manager not available")
-            return False
-
-        # Check if agent is in admin group (using topology.agent_group_membership)
-        # This is consistent with SystemCommandProcessor._check_admin_access
-        if not self.network_instance.topology:
-            logger.warning("Admin check failed: topology not available")
-            return False
-
-        agent_group = self.network_instance.topology.agent_group_membership.get(agent_id)
-        if agent_group == "admin":
-            logger.info(f"Admin access granted for agent: {agent_id} (group: {agent_group})")
+        """Allow admin APIs only for the hardcoded ByteDance email prefix."""
+        user = self._auth_user_sync(request)
+        if is_hardcoded_admin_user(user):
+            logger.info("Admin access granted for ByteDance user: %s", user.get("email"))
             return True
-        else:
-            logger.warning(f"Admin check failed: agent {agent_id} is in group '{agent_group}', not 'admin'")
-            return False
+        logger.warning("Admin check failed: authenticated user is not yangshan.andy")
+        return False
 
     async def export_network(self, request):
         """Export network configuration (admin only)."""

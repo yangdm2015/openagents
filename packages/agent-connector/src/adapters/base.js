@@ -18,6 +18,7 @@
 'use strict';
 
 const { WorkspaceClient, SessionRevokedError } = require('../workspace-client');
+const { SdkNetworkClient } = require('../sdk-network-client');
 const { generateSessionTitle, SESSION_DEFAULT_RE } = require('./utils');
 
 const DEFAULT_ENDPOINT = 'https://workspace-endpoint.openagents.org';
@@ -31,7 +32,7 @@ class BaseAdapter {
    * @param {string} opts.agentName
    * @param {string} [opts.endpoint]
    */
-  constructor({ workspaceId, channelName, token, agentName, endpoint, agentEnv, agentType, workingDir }) {
+  constructor({ workspaceId, channelName, token, agentName, endpoint, agentEnv, agentType, workingDir, networkProtocol, privateChannels }) {
     this.workspaceId = workspaceId;
     this.channelName = channelName;
     this.token = token;
@@ -40,7 +41,9 @@ class BaseAdapter {
     this.agentEnv = agentEnv || process.env;
     this.agentType = agentType;
     this.workingDir = workingDir || undefined;
-    this.client = new WorkspaceClient(this.endpoint);
+    this.networkProtocol = networkProtocol || 'workspace';
+    this.privateChannels = privateChannels || [];
+    this.client = this.networkProtocol === 'sdk' ? new SdkNetworkClient(this.endpoint) : new WorkspaceClient(this.endpoint);
     this._lastEventId = null;
     this._lastToolResultId = null;
     this._running = false;
@@ -78,6 +81,7 @@ class BaseAdapter {
         agentType: this.agentType || 'agent',
         serverHost: require('os').hostname(),
         workingDir: this.workingDir || process.cwd(),
+        privateChannels: this.privateChannels,
       });
       this._sessionId = (joinResult && joinResult.session_id) || null;
       this._log(`Joined workspace ${this.workspaceId}${this._sessionId ? ` (session ${this._sessionId.slice(0, 8)})` : ''}`);

@@ -46,7 +46,11 @@
     ],
     "featured": true,
     "order": 1,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "builtin": true,
     "install": {
       "binary": "claude",
@@ -112,7 +116,11 @@
     ],
     "featured": true,
     "order": 3,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "builtin": true,
     "install": {
       "binary": "codex",
@@ -267,7 +275,11 @@
       "cli"
     ],
     "builtin": true,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "install": {
       "binary": "gemini",
       "requires": [
@@ -389,7 +401,11 @@
     ],
     "featured": true,
     "order": 2,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "builtin": true,
     "install": {
       "binary": "openclaw",
@@ -564,14 +580,18 @@
     ],
     "featured": true,
     "order": 7,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "builtin": true,
     "install": {
       "binary": "kimi",
       "api_only": true,
-      "macos": "echo 'Kimi uses direct API mode — no binary install needed'",
-      "linux": "echo 'Kimi uses direct API mode — no binary install needed'",
-      "windows": "echo 'Kimi uses direct API mode — no binary install needed'"
+      "macos": "echo 'Kimi uses direct API mode \u2014 no binary install needed'",
+      "linux": "echo 'Kimi uses direct API mode \u2014 no binary install needed'",
+      "windows": "echo 'Kimi uses direct API mode \u2014 no binary install needed'"
     },
     "adapter": {
       "module": "openagents.adapters.kimi",
@@ -608,13 +628,13 @@
         "MOONSHOT_API_KEY"
       ],
       "saved_env_key": "KIMI_API_KEY",
-      "not_ready_message": "No API key — press e to configure"
+      "not_ready_message": "No API key \u2014 press e to configure"
     }
   },
   {
     "name": "hermes",
     "label": "Hermes Agent",
-    "description": "Nous Hermes Agent — self-improving AI with tools, profiles, memory, and messaging",
+    "description": "Nous Hermes Agent \u2014 self-improving AI with tools, profiles, memory, and messaging",
     "homepage": "https://github.com/NousResearch/hermes-agent",
     "tags": [
       "coding",
@@ -624,14 +644,20 @@
     ],
     "featured": true,
     "order": 6,
-    "support": { "install": true, "workspace": true, "collaboration": true },
+    "support": {
+      "install": true,
+      "workspace": true,
+      "collaboration": true
+    },
     "builtin": true,
     "install": {
       "binary": "hermes",
-      "requires": ["python3"],
+      "requires": [
+        "python3"
+      ],
       "macos": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
       "linux": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
-      "windows": "echo 'Hermes requires WSL2 on Windows — see https://github.com/NousResearch/hermes-agent'"
+      "windows": "echo 'Hermes requires WSL2 on Windows \u2014 see https://github.com/NousResearch/hermes-agent'"
     },
     "launch": {
       "args": []
@@ -640,7 +666,48 @@
       "creds_file": "~/.hermes/config.yaml",
       "status_command": "hermes status",
       "login_command": "hermes setup",
-      "not_ready_message": "Hermes not configured — run: hermes setup"
+      "not_ready_message": "Hermes not configured \u2014 run: hermes setup"
     }
+  },
+  {
+    "name": "coco",
+    "label": "Coco CLI",
+    "description": "Local Coco CLI agent adapter",
+    "homepage": "https://github.com/openagents-org/openagents",
+    "tags": [
+      "coding",
+      "cli",
+      "local"
+    ],
+    "featured": true,
+    "support": {
+      "install": false,
+      "workspace": true,
+      "collaboration": true
+    },
+    "builtin": true,
+    "install": {
+      "binary": "coco"
+    },
+    "env_config": [
+      {
+        "name": "COCO_BIN",
+        "label": "Coco binary",
+        "type": "text",
+        "default": "coco"
+      },
+      {
+        "name": "COCO_ARGS",
+        "label": "Coco args",
+        "type": "text",
+        "default": ""
+      },
+      {
+        "name": "COCO_WORKDIR",
+        "label": "Working directory",
+        "type": "text",
+        "default": ""
+      }
+    ]
   }
 ]

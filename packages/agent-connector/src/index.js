@@ -6,6 +6,9 @@ const { Registry } = require('./registry');
 const { Installer } = require('./installer');
 const { Daemon } = require('./daemon');
 const { WorkspaceClient } = require('./workspace-client');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 /**
  * Main entry point for the agent-connector library.
@@ -84,19 +87,51 @@ class AgentConnector {
         network: a.network || null,
         networkName: network ? (network.name || network.slug) : null,
         path: a.path || null,
+        channels: a.channels || [],
         env: { ...typeEnv, ...(a.env || {}) },
         instanceEnv: { ...(a.env || {}) },
       };
     });
   }
 
-  addAgent({ name, type, role, path, env }) {
-    this.config.addAgent({ name, type: type || 'openclaw', role: role || 'worker', path, env });
+  listActions() {
+    const actions = this.config.getActions();
+    const networks = this.config.getNetworks();
+    return actions.map((a) => {
+      const runtime = a.runtime || a.type || 'coco';
+      const typeEnv = this.env.load(runtime);
+      const network = networks.find((n) => n.slug === a.network || n.id === a.network);
+      return {
+        name: a.name,
+        runtime,
+        type: runtime,
+        network: a.network || null,
+        networkName: network ? (network.name || network.slug) : null,
+        path: a.path || null,
+        channels: a.channels || [],
+        env: { ...typeEnv, ...(a.env || {}) },
+        instanceEnv: { ...(a.env || {}) },
+      };
+    });
+  }
+
+  addAgent({ name, type, role, path, env, network, channels }) {
+    this.config.addAgent({ name, type: type || 'openclaw', role: role || 'worker', path, env, network, channels });
+    return { success: true };
+  }
+
+  addAction({ name, runtime, type, path, env, network, channels }) {
+    this.config.addAction({ name, runtime: runtime || type || 'coco', path, env, network, channels });
     return { success: true };
   }
 
   removeAgent(name) {
     this.config.removeAgent(name);
+    return { success: true };
+  }
+
+  removeAction(name) {
+    this.config.removeAction(name);
     return { success: true };
   }
 
@@ -151,6 +186,7 @@ class AgentConnector {
 
   listWorkspaces() {
     return this.config.getNetworks().map((n) => ({
+      ...n,
       id: n.id,
       slug: n.slug,
       name: n.name || n.slug,
@@ -176,6 +212,9 @@ class AgentConnector {
       // Use the network's specific endpoint (e.g., localhost vs official)
       const endpoint = network.endpoint || (this.workspace && this.workspace.endpoint);
       const { WorkspaceClient } = require('./workspace-client');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
       const tempClient = new WorkspaceClient(endpoint);
       // Try to remove from backend first
       await tempClient.deleteWorkspace(network.id, network.token || '');
@@ -259,6 +298,22 @@ class AgentConnector {
     return this.workspace.joinNetwork(agentName, token, opts);
   }
 
+  getPairingToken() {
+    const tokenFile = path.join(this._configDir, 'local-api.token');
+    try {
+      if (fs.existsSync(tokenFile)) return fs.readFileSync(tokenFile, 'utf8').trim();
+    } catch {}
+    const token = crypto.randomBytes(24).toString('hex');
+    fs.mkdirSync(this._configDir, { recursive: true });
+    fs.writeFileSync(tokenFile, token + '\n', { encoding: 'utf8', mode: 0o600 });
+    return token;
+  }
+
+  createLocalApiServer(opts = {}) {
+    const { LocalApiServer } = require('./local-api');
+    return new LocalApiServer({ connector: this, ...opts });
+  }
+
   async resolveToken(token) {
     return this.workspace.resolveToken(token);
   }
@@ -272,6 +327,7 @@ class AgentConnector {
 }
 
 const adapters = require('./adapters');
+const { LocalApiServer } = require('./local-api');
 
 const paths = require('./paths');
-module.exports = { AgentConnector, Daemon, WorkspaceClient, adapters, paths };
+module.exports = { AgentConnector, Daemon, WorkspaceClient, LocalApiServer, adapters, paths };

@@ -144,6 +144,7 @@ class ThreadMessagingNetworkMod(BaseMod):
 
         # Initialize mod state
         self.active_agents: Set[str] = set()
+        self.agent_metadata: Dict[str, Dict[str, Any]] = {}
         self.message_history: Dict[str, Event] = {}  # message_id -> message
         self.threads: Dict[str, MessageThread] = {}  # thread_id -> MessageThread
         self.message_to_thread: Dict[str, str] = {}  # message_id -> thread_id
@@ -226,6 +227,8 @@ class ThreadMessagingNetworkMod(BaseMod):
             self.channels[channel_name] = {
                 "name": channel_name,
                 "description": description,
+                "visibility": "public",
+                "owner_user_id": None,
                 "created_timestamp": int(time.time()),
                 "message_count": 0,
                 "thread_count": 0,
@@ -239,18 +242,28 @@ class ThreadMessagingNetworkMod(BaseMod):
 
         logger.info(f"Initialized channels: {list(self.channels.keys())}")
 
-    def _create_channel(self, channel_name: str, description: str = "") -> None:
+    def _create_channel(
+        self,
+        channel_name: str,
+        description: str = "",
+        visibility: str = "public",
+        owner_user_id: Optional[str] = None,
+    ) -> None:
         """Create a new channel.
 
         Args:
             channel_name: Name of the channel to create
             description: Optional description for the channel
+            visibility: public or private
+            owner_user_id: Owner for private channels
         """
         if channel_name not in self.channels:
             # Store channel metadata locally
             self.channels[channel_name] = {
                 "name": channel_name,
                 "description": description,
+                "visibility": visibility or "public",
+                "owner_user_id": owner_user_id,
                 "created_timestamp": int(time.time()),
                 "message_count": 0,
                 "thread_count": 0,
@@ -259,6 +272,44 @@ class ThreadMessagingNetworkMod(BaseMod):
             # Create channel in EventGateway (single source of truth for membership)
             self.network.event_gateway.create_channel(channel_name)
             logger.info(f"Created channel: {channel_name}")
+        else:
+            info = self.channels[channel_name]
+            info.setdefault("visibility", visibility or "public")
+            if owner_user_id and not info.get("owner_user_id"):
+                info["owner_user_id"] = owner_user_id
+
+    def _source_can_access_channel(self, source_id: Optional[str], channel_name: str) -> bool:
+        channel_info = self.channels.get(channel_name)
+        if not channel_info:
+            return False
+        if channel_info.get("visibility") != "private":
+            return True
+
+        metadata = self.agent_metadata.get(_bare_agent_id(source_id or ""), {})
+        if channel_name in (metadata.get("private_channels") or []):
+            return True
+
+        owner_user_id = channel_info.get("owner_user_id")
+        # Web sessions represent the owner and can see all of their private channels.
+        # Local agents only see channels explicitly bound into private_channels.
+        return (
+            owner_user_id
+            and metadata.get("owner_user_id") == owner_user_id
+            and metadata.get("platform") == "web"
+        )
+
+    def _add_agent_to_allowed_channels(self, agent_id: str) -> None:
+        for channel_name, channel_info in self.channels.items():
+            if channel_info.get("visibility") == "private" and not self._source_can_access_channel(agent_id, channel_name):
+                continue
+            channel_members = self.network.event_gateway.get_channel_members(channel_name)
+            if agent_id not in channel_members:
+                self.network.event_gateway.add_channel_member(channel_name, agent_id)
+                logger.info(
+                    f"✅ AUTO-ADDED agent {agent_id} to channel '{channel_name}' (total agents: {len(self.network.event_gateway.get_channel_members(channel_name))})"
+                )
+            else:
+                logger.info(f"ℹ️  Agent {agent_id} already in channel '{channel_name}'")
 
     def bind_network(self, network):
         """Bind the mod to a network and initialize channels."""
@@ -269,6 +320,19 @@ class ThreadMessagingNetworkMod(BaseMod):
 
         # Now that network is available, initialize default channels
         self._initialize_default_channels()
+        self._initialize_user_private_channels()
+
+    def _initialize_user_private_channels(self) -> None:
+        workspace_manager = getattr(self.network, "workspace_manager", None)
+        if not workspace_manager or not hasattr(workspace_manager, "list_all_user_channels"):
+            return
+        for channel in workspace_manager.list_all_user_channels():
+            self._create_channel(
+                channel["channel_name"],
+                channel.get("description") or channel.get("name") or "Private channel",
+                visibility="private",
+                owner_user_id=channel.get("user_id"),
+            )
 
     def _setup_file_storage(self):
         """Set up file storage using workspace or temporary directory."""
@@ -373,25 +437,11 @@ class ThreadMessagingNetworkMod(BaseMod):
         logger.info(f"🎯 THREAD MESSAGING MOD: Agent metadata: {metadata}")
 
         self.active_agents.add(agent_id)
+        self.agent_metadata[agent_id] = metadata or {}
 
-        # Add agent to all existing channels by default
-        # This ensures Studio UI and all agents receive channel messages
+        # Add agent to public channels and to private channels it owns or is bound to.
         channels_before = len(self.channels)
-        for channel_name in self.channels.keys():
-            # Check if agent is already in channel using EventGateway
-            channel_members = self.network.event_gateway.get_channel_members(
-                channel_name
-            )
-            was_in_channel = agent_id in channel_members
-
-            if not was_in_channel:
-                # Add agent to channel in EventGateway (single source of truth)
-                self.network.event_gateway.add_channel_member(channel_name, agent_id)
-                logger.info(
-                    f"✅ AUTO-ADDED agent {agent_id} to channel '{channel_name}' (total agents: {len(self.network.event_gateway.get_channel_members(channel_name))})"
-                )
-            else:
-                logger.info(f"ℹ️  Agent {agent_id} already in channel '{channel_name}'")
+        self._add_agent_to_allowed_channels(agent_id)
 
         # If no channels exist yet, create general channel and add agent
         if channels_before == 0:
@@ -437,6 +487,7 @@ class ThreadMessagingNetworkMod(BaseMod):
         """
         if agent_id in self.active_agents:
             self.active_agents.remove(agent_id)
+            self.agent_metadata.pop(agent_id, None)
 
             # Remove from all channels in EventGateway
             for channel_name in self.channels.keys():
@@ -1218,14 +1269,28 @@ class ThreadMessagingNetworkMod(BaseMod):
         # Track message in channel
         channel = ChannelMessage.get_channel(message)
         if channel in self.channels:
+            if not self._source_can_access_channel(message.source_id, channel):
+                logger.warning(
+                    f"Rejecting channel message from {message.source_id}: no access to private channel {channel}"
+                )
+                return
             self.channels[channel]["message_count"] += 1
         else:
-            # Auto-create channel and add all active agents to it
-            logger.info(f"Auto-creating channel {channel} and adding all active agents")
-            self._create_channel(channel, f"Auto-created channel {channel}")
+            # Auto-created channels remain public unless the sender already carries a private namespace.
+            is_private = channel.startswith("u_")
+            source_metadata = self.agent_metadata.get(_bare_agent_id(message.source_id or ""), {})
+            logger.info(f"Auto-creating channel {channel}")
+            self._create_channel(
+                channel,
+                f"Auto-created channel {channel}",
+                visibility="private" if is_private else "public",
+                owner_user_id=source_metadata.get("owner_user_id") if is_private else None,
+            )
 
-            # Add all active agents to the new channel in EventGateway
+            # Add eligible active agents to the new channel in EventGateway
             for agent_id in self.active_agents:
+                if not self._source_can_access_channel(agent_id, channel):
+                    continue
                 self.network.event_gateway.add_channel_member(channel, agent_id)
                 logger.info(f"Added agent {agent_id} to auto-created channel {channel}")
 
@@ -1646,6 +1711,8 @@ class ThreadMessagingNetworkMod(BaseMod):
         # Both thread.channels.info and thread.channels.list events route here
         channels_data = []
         for channel_name, channel_info in self.channels.items():
+            if not self._source_can_access_channel(message.source_id, channel_name):
+                continue
             agents_in_channel = self.network.event_gateway.get_channel_members(
                 channel_name
             )
@@ -1653,6 +1720,7 @@ class ThreadMessagingNetworkMod(BaseMod):
                 {
                     "name": channel_name,
                     "description": channel_info["description"],
+                    "visibility": channel_info.get("visibility", "public"),
                     "message_count": channel_info["message_count"],
                     "thread_count": channel_info["thread_count"],
                     "agents": agents_in_channel,
@@ -1712,6 +1780,13 @@ class ThreadMessagingNetworkMod(BaseMod):
             return {
                 "success": False,
                 "error": f"Channel '{channel}' not found",
+                "request_id": self._get_request_id(message),
+            }
+
+        if not self._source_can_access_channel(message.source_id, channel):
+            return {
+                "success": False,
+                "error": f"Access denied for channel '{channel}'",
                 "request_id": self._get_request_id(message),
             }
 

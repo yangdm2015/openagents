@@ -28,7 +28,7 @@ class Config {
     } catch (err) {
       console.error('Failed to load config:', err.message);
     }
-    return { version: 2, agents: [], networks: [] };
+    return { version: 2, agents: [], actions: [], networks: [] };
   }
 
   getAgents() {
@@ -39,8 +39,16 @@ class Config {
     return this.load().networks || [];
   }
 
+  getActions() {
+    return this.load().actions || [];
+  }
+
   getAgent(name) {
     return this.getAgents().find((a) => a.name === name) || null;
+  }
+
+  getAction(name) {
+    return this.getActions().find((a) => a.name === name) || null;
   }
 
   // -- Write --
@@ -50,13 +58,15 @@ class Config {
     fs.writeFileSync(this.configFile, serializeYaml(config), 'utf-8');
   }
 
-  addAgent({ name, type, role, path: agentPath, env }) {
+  addAgent({ name, type, role, path: agentPath, env, network, channels }) {
     const config = this.load();
     if (config.agents.some((a) => a.name === name)) {
       throw new Error(`Agent '${name}' already exists`);
     }
     const entry = { name, type: type || 'openclaw', role: role || 'worker' };
     if (agentPath) entry.path = agentPath;
+    if (network) entry.network = network;
+    if (channels && channels.length > 0) entry.channels = channels;
     if (env && Object.keys(env).length > 0) entry.env = env;
     config.agents.push(entry);
     this.save(config);
@@ -102,6 +112,42 @@ class Config {
     return agent.env || {};
   }
 
+  addAction({ name, runtime, type, path: actionPath, env, network, channels }) {
+    const config = this.load();
+    config.actions = config.actions || [];
+    if (config.actions.some((a) => a.name === name)) {
+      throw new Error(`Action '${name}' already exists`);
+    }
+    const entry = { name, runtime: runtime || type || 'coco' };
+    if (actionPath) entry.path = actionPath;
+    if (network) entry.network = network;
+    if (channels && channels.length > 0) entry.channels = channels;
+    if (env && Object.keys(env).length > 0) entry.env = env;
+    config.actions.push(entry);
+    this.save(config);
+    return entry;
+  }
+
+  removeAction(name) {
+    const config = this.load();
+    config.actions = config.actions || [];
+    const idx = config.actions.findIndex((a) => a.name === name);
+    if (idx === -1) return false;
+    config.actions.splice(idx, 1);
+    this.save(config);
+    return true;
+  }
+
+  updateAction(name, updates) {
+    const config = this.load();
+    config.actions = config.actions || [];
+    const action = config.actions.find((a) => a.name === name);
+    if (!action) throw new Error(`Action '${name}' not found`);
+    Object.assign(action, updates);
+    this.save(config);
+    return action;
+  }
+
   setAgentNetwork(agentName, networkSlug) {
     const config = this.load();
     const agent = config.agents.find((a) => a.name === agentName);
@@ -114,16 +160,19 @@ class Config {
     this.save(config);
   }
 
-  addNetwork({ id, slug, name, endpoint, token }) {
+  addNetwork({ id, slug, name, endpoint, token, ...extra }) {
     const config = this.load();
-    if (config.networks.some((n) => n.slug === slug || n.id === id)) {
-      return; // already exists
+    let entry = config.networks.find((n) => n.slug === slug || n.id === id);
+    if (!entry) {
+      entry = { id, slug };
+      config.networks.push(entry);
     }
-    const entry = { id, slug };
     if (name) entry.name = name;
     if (endpoint) entry.endpoint = endpoint;
     if (token) entry.token = token;
-    config.networks.push(entry);
+    for (const [key, value] of Object.entries(extra || {})) {
+      if (value !== undefined && value !== null && value !== '') entry[key] = value;
+    }
     this.save(config);
     return entry;
   }
@@ -136,6 +185,10 @@ class Config {
     // Disconnect any agents that were on this network
     for (const agent of config.agents) {
       if (agent.network === slug) delete agent.network;
+    }
+    // Disconnect any actions that were on this network.
+    for (const action of (config.actions || [])) {
+      if (action.network === slug) delete action.network;
     }
     this.save(config);
     return true;
@@ -256,7 +309,7 @@ class Config {
 
 function parseYaml(text) {
   const lines = text.split('\n');
-  const result = { version: 2, agents: [], networks: [] };
+  const result = { version: 2, agents: [], actions: [], networks: [] };
   let currentList = null;
   let currentItem = null;
 
@@ -293,6 +346,8 @@ function parseYaml(text) {
         currentList = null;
       } else if (key === 'agents') {
         currentList = 'agents';
+      } else if (key === 'actions') {
+        currentList = 'actions';
       } else if (key === 'networks') {
         currentList = 'networks';
       } else {
@@ -452,6 +507,20 @@ function serializeYaml(config) {
     }
   }
   if (!config.agents || config.agents.length === 0) {
+    lines[lines.length - 1] += ' []';
+  }
+
+  lines.push('actions:');
+  for (const action of (config.actions || [])) {
+    const keys = Object.keys(action);
+    if (keys.length === 0) continue;
+    lines.push(`- name: ${serializeYamlValue(action.name)}`);
+    for (const key of keys) {
+      if (key === 'name') continue;
+      lines.push(`  ${key}: ${serializeYamlValue(action[key])}`);
+    }
+  }
+  if (!config.actions || config.actions.length === 0) {
     lines[lines.length - 1] += ' []';
   }
 

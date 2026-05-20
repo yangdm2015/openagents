@@ -42,7 +42,7 @@ class Daemon {
    * Call this from the foreground daemon process.
    */
   async start() {
-    const agents = this.config.getAgents();
+    const agents = this._getRunnableConfigs();
     for (const agent of agents) {
       this._launchAgent(agent);
     }
@@ -301,7 +301,7 @@ class Daemon {
 
   _launchAgent(agentCfg) {
     const name = agentCfg.name;
-    const type = agentCfg.type || 'openclaw';
+    const type = this._getRuntimeType(agentCfg);
 
     // Prevent duplicate launches — if an adapter is already running, skip
     if (this._adapters && this._adapters[name]) {
@@ -429,18 +429,20 @@ class Daemon {
 
   async _adapterLoop(name, agentCfg, info, network) {
     const { createAdapter } = require('./adapters');
-    const agentType = agentCfg.type || 'openclaw';
+    const agentType = this._getRuntimeType(agentCfg);
     const endpoint = network.endpoint || 'https://workspace-endpoint.openagents.org';
 
     let adapter;
     try {
       adapter = createAdapter(agentType, {
         workspaceId: network.id,
-        channelName: 'general',
-        token: network.token,
+        channelName: (agentCfg.channels && agentCfg.channels[0]) || agentCfg.channel || 'general',
+        token: network.owner_connect_token || network.token,
         agentName: name,
         endpoint,
         agentType,
+        networkProtocol: network.protocol || 'workspace',
+        privateChannels: agentCfg.channels || [],
         openclawAgentId: agentCfg.openclaw_agent_id || 'main',
         disabledModules: new Set(),
         agentEnv: this._buildAgentEnv(agentCfg),
@@ -490,14 +492,15 @@ class Daemon {
   // has been moved to src/adapters/. The daemon delegates via createAdapter().
 
   _resolveAgentBinary(agentCfg) {
-    const entry = this.registry.getEntry(agentCfg.type);
+    const runtimeType = this._getRuntimeType(agentCfg);
+    const entry = this.registry.getEntry(runtimeType);
     let binary = (entry && entry.install && entry.install.binary);
     if (!binary) {
       const knownBinaries = {
         openclaw: 'openclaw', claude: 'claude', codex: 'codex',
-        aider: 'aider', goose: 'goose', gemini: 'gemini',
+        aider: 'aider', goose: 'goose', gemini: 'gemini', coco: 'coco',
       };
-      binary = knownBinaries[agentCfg.type];
+      binary = knownBinaries[runtimeType];
     }
     return binary || null;
   }
@@ -540,7 +543,7 @@ class Daemon {
     const binary = this._resolveAgentBinary(agentCfg);
     if (!binary) return null;
 
-    const entry = this.registry.getEntry(agentCfg.type);
+    const entry = this.registry.getEntry(this._getRuntimeType(agentCfg));
     const args = [];
 
     // Add launch args from registry
@@ -552,7 +555,7 @@ class Daemon {
 
     // Built-in launch profiles for local-only agents
     if (!args.length) {
-      const type = agentCfg.type || '';
+      const type = this._getRuntimeType(agentCfg);
       if (type === 'claude') {
         args.push('--print');
       } else if (type === 'codex') {
@@ -564,7 +567,7 @@ class Daemon {
   }
 
   _buildAgentEnv(agentCfg) {
-    const type = agentCfg.type || 'openclaw';
+    const type = this._getRuntimeType(agentCfg);
     const saved = this.envManager.load(type);
     const mergedSaved = { ...saved, ...(agentCfg.env || {}) };
     const resolved = this.envManager.resolve(type, mergedSaved, this.registry);
@@ -572,10 +575,33 @@ class Daemon {
     return { ...process.env, ...merged };
   }
 
+  _getRuntimeType(agentCfg) {
+    return agentCfg.type || agentCfg.runtime || 'openclaw';
+  }
+
+  _actionToRunnable(action) {
+    return {
+      ...action,
+      type: action.runtime || action.type || 'coco',
+      role: action.role || 'action',
+      isAction: true,
+    };
+  }
+
+  _getRunnableConfigs() {
+    const agents = this.config.getAgents();
+    const actions = (this.config.getActions ? this.config.getActions() : [])
+      .map((action) => this._actionToRunnable(action));
+    return [...agents, ...actions];
+  }
+
   _agentConfigFingerprint(agentCfg) {
     return JSON.stringify({
+      type: this._getRuntimeType(agentCfg),
       network: agentCfg.network || '',
       env: agentCfg.env || {},
+      path: agentCfg.path || '',
+      channels: agentCfg.channels || [],
     });
   }
 
@@ -700,7 +726,7 @@ class Daemon {
     const oldConfigs = this._cachedAgentConfigs || {};
     // Re-read config from disk
     this.config.load();
-    const newAgents = this.config.getAgents();
+    const newAgents = this._getRunnableConfigs();
     const newNames = new Set(newAgents.map(a => a.name));
     const newConfigs = {};
     for (const a of newAgents) newConfigs[a.name] = this._agentConfigFingerprint(a);
