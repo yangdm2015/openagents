@@ -132,4 +132,25 @@ describe("MessagingSidebar channel creation", () => {
       primary_agent_id: "planner",
     })
   })
+
+  it("shows the private channel display name instead of the internal channel name", () => {
+    useChatStore.setState({
+      currentChannel: "u_owner_private",
+      channels: [
+        {
+          name: "u_owner_private",
+          display_name: "private",
+          description: "",
+          agents: [],
+          message_count: 0,
+          thread_count: 0,
+        },
+      ],
+    })
+
+    render(<MessagingSidebar />)
+
+    expect(screen.getByText("private")).not.toBeNull()
+    expect(screen.queryByText("u_owner_private")).toBeNull()
+  })
 })

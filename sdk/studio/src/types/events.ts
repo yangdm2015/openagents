@@ -106,8 +106,13 @@ export type { RawThreadMessage as ThreadMessageNew } from './message';
 
 export interface ThreadChannel {
   name: string;
+  channel_name?: string;
+  display_name?: string;
   description: string;
+  visibility?: 'public' | 'private';
   agents: string[];
+  participant_agent_ids?: string[];
+  primary_agent_id?: string | null;
   message_count: number;
   thread_count: number;
 }

@@ -231,6 +231,37 @@ const ThreadMessagingViewEventBased: React.FC = () => {
     return agents.filter((agent) => agent.agent_id !== currentUserId)
   }, [agents, connectionStatus.agentId, agentName])
 
+  const currentChannelInfo = useMemo(() => {
+    if (!currentChannel) return null
+    return channels.find((channel) => channel.name === currentChannel) || null
+  }, [channels, currentChannel])
+
+  const currentChannelDisplayName =
+    currentChannelInfo?.display_name || currentChannel || ""
+
+  const onlineAgentIds = useMemo(
+    () => new Set(agents.map((agent) => agent.agent_id)),
+    [agents]
+  )
+
+  const currentChannelParticipantIds = useMemo(
+    () => currentChannelInfo?.participant_agent_ids || [],
+    [currentChannelInfo]
+  )
+
+  const onlineParticipantIds = useMemo(
+    () =>
+      currentChannelParticipantIds.filter((agentId) =>
+        onlineAgentIds.has(agentId)
+      ),
+    [currentChannelParticipantIds, onlineAgentIds]
+  )
+
+  const showNoOnlineParticipants =
+    currentChannelInfo?.visibility === "private" &&
+    currentChannelParticipantIds.length > 0 &&
+    onlineParticipantIds.length === 0
+
   // Load initial data function
   const loadInitialData = useCallback(async () => {
     try {
@@ -662,10 +693,16 @@ const ThreadMessagingViewEventBased: React.FC = () => {
       const [a, b] = currentAgentConversation.split(",", 2)
       return `${a} ↔ ${b}`
     }
-    if (currentChannel) return `#${currentChannel}`
+    if (currentChannel) return `#${currentChannelDisplayName}`
     if (currentDirectMessage) return `@${currentDirectMessage}`
     return t("header.selectChannel")
-  }, [currentChannel, currentDirectMessage, currentAgentConversation, t])
+  }, [
+    currentChannel,
+    currentChannelDisplayName,
+    currentDirectMessage,
+    currentAgentConversation,
+    t,
+  ])
 
   // Check if its a project channel, if so use ProjectChatRoom component
   const projectId = useMemo(() => {
@@ -758,6 +795,14 @@ const ThreadMessagingViewEventBased: React.FC = () => {
             </div>
           )}
 
+          {showNoOnlineParticipants && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+              No online participating agents for this channel. Start{" "}
+              {currentChannelInfo?.primary_agent_id || "a bound agent"} from
+              Management Console to get replies.
+            </div>
+          )}
+
           {/* Messages */}
           <div
             ref={messagesContainerRef}
@@ -824,7 +869,7 @@ const ThreadMessagingViewEventBased: React.FC = () => {
                   <div className="text-center text-gray-500 dark:text-gray-400 py-8">
                     {currentChannel
                       ? t("empty.noMessagesChannel", {
-                          channel: currentChannel,
+                          channel: currentChannelDisplayName,
                         })
                       : currentDirectMessage
                       ? t("empty.noMessagesDirect", {
@@ -970,7 +1015,7 @@ const ThreadMessagingViewEventBased: React.FC = () => {
                 sendingMessage
                   ? "Sending..."
                   : currentChannel
-                  ? `Message #${currentChannel}`
+                  ? `Message #${currentChannelDisplayName}`
                   : currentDirectMessage
                   ? `Message ${currentDirectMessage}`
                   : "Select a channel to start typing..."

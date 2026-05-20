@@ -21,38 +21,44 @@ const SectionHeader: React.FC<{ title: string }> = React.memo(({ title }) => (
 ));
 SectionHeader.displayName = "SectionHeader";
 
+const getChannelDisplayName = (channel: ThreadChannel) =>
+  channel.display_name || channel.name;
+
 // Channel List Item Component
 const ChannelItem: React.FC<{
   channel: ThreadChannel;
   isActive: boolean;
   unreadCount: number;
   onClick: () => void;
-}> = React.memo(({ channel, isActive, unreadCount, onClick }) => (
-  <li>
-    <button
-      onClick={onClick}
-      className={`w-full text-left text-sm truncate px-2 py-2 font-medium rounded transition-colors
+}> = React.memo(({ channel, isActive, unreadCount, onClick }) => {
+  const displayName = getChannelDisplayName(channel);
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        className={`w-full text-left text-sm truncate px-2 py-2 font-medium rounded transition-colors
         ${isActive
           ? "bg-[#F4F4F5] text-gray-900 dark:bg-[#F4F4F5] dark:text-gray-900 pl-2"
           : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-900 pl-2.5"
         }
       `}
-      title={channel.description || channel.name}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center min-w-0">
-          <span className="mr-2 text-gray-400">#</span>
-          <span className="truncate">{channel.name}</span>
+        title={channel.description || displayName}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center min-w-0">
+            <span className="mr-2 text-gray-400">#</span>
+            <span className="truncate">{displayName}</span>
+          </div>
+          {unreadCount > 0 && (
+            <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
         </div>
-        {unreadCount > 0 && (
-          <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-      </div>
-    </button>
-  </li>
-));
+      </button>
+    </li>
+  );
+});
 ChannelItem.displayName = "ChannelItem";
 
 // Agent List Item Component

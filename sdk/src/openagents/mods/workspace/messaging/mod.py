@@ -250,6 +250,7 @@ class ThreadMessagingNetworkMod(BaseMod):
         owner_user_id: Optional[str] = None,
         participant_agent_ids: Optional[List[str]] = None,
         primary_agent_id: Optional[str] = None,
+        display_name: Optional[str] = None,
     ) -> None:
         """Create a new channel.
 
@@ -259,10 +260,12 @@ class ThreadMessagingNetworkMod(BaseMod):
             visibility: public or private
             owner_user_id: Owner for private channels
         """
+        visible_name = display_name or channel_name
         if channel_name not in self.channels:
             # Store channel metadata locally
             self.channels[channel_name] = {
                 "name": channel_name,
+                "display_name": visible_name,
                 "description": description,
                 "visibility": visibility or "public",
                 "owner_user_id": owner_user_id,
@@ -280,6 +283,8 @@ class ThreadMessagingNetworkMod(BaseMod):
         else:
             info = self.channels[channel_name]
             info.setdefault("visibility", visibility or "public")
+            if display_name is not None:
+                info["display_name"] = visible_name
             if owner_user_id and not info.get("owner_user_id"):
                 info["owner_user_id"] = owner_user_id
             if participant_agent_ids is not None:
@@ -358,6 +363,7 @@ class ThreadMessagingNetworkMod(BaseMod):
                 owner_user_id=channel.get("user_id"),
                 participant_agent_ids=channel.get("agents") or [],
                 primary_agent_id=channel.get("primary_agent_id"),
+                display_name=channel.get("name"),
             )
 
     def _setup_file_storage(self):
@@ -1780,17 +1786,52 @@ class ThreadMessagingNetworkMod(BaseMod):
         # Channel info operations are now handled based on specific event patterns
         # Both thread.channels.info and thread.channels.list events route here
         channels_data = []
+        workspace_manager = getattr(self.network, "workspace_manager", None)
         for channel_name, channel_info in self.channels.items():
             if not self._source_can_access_channel(message.source_id, channel_name):
                 continue
             agents_in_channel = self.network.event_gateway.get_channel_members(
                 channel_name
             )
+
+            persisted_channel = None
+            if workspace_manager and hasattr(
+                workspace_manager, "get_user_channel_by_internal_name"
+            ):
+                try:
+                    persisted_channel = (
+                        workspace_manager.get_user_channel_by_internal_name(channel_name)
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to load persisted channel metadata for %s: %s",
+                        channel_name,
+                        exc,
+                    )
+
+            display_name = channel_info.get("display_name") or channel_name
+            participant_agent_ids = list(
+                channel_info.get("participant_agent_ids") or []
+            )
+            primary_agent_id = channel_info.get("primary_agent_id")
+            if persisted_channel:
+                display_name = persisted_channel.get("name") or display_name
+                participant_agent_ids = list(
+                    persisted_channel.get("agents") or participant_agent_ids
+                )
+                primary_agent_id = (
+                    persisted_channel.get("primary_agent_id") or primary_agent_id
+                )
+
             channels_data.append(
                 {
                     "name": channel_name,
+                    "channel_name": channel_name,
+                    "display_name": display_name,
                     "description": channel_info["description"],
                     "visibility": channel_info.get("visibility", "public"),
+                    "participant_agent_ids": participant_agent_ids,
+                    "primary_agent_id": primary_agent_id,
                     "message_count": channel_info["message_count"],
                     "thread_count": channel_info["thread_count"],
                     "agents": agents_in_channel,
