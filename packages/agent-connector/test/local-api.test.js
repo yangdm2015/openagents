@@ -41,9 +41,11 @@ test('local API requires pairing token and stores SDK action config locally', as
     const token = connector.getPairingToken();
     const created = await request(baseUrl, 'POST', '/api/actions', {
       name: 'coco-one',
-      runtime: 'coco',
+      runtime: 'claude',
+      model: 'claude-sonnet-4-5',
+      description: 'Handles private channel coding tasks',
       path: '/tmp/work',
-      env: { COCO_BIN: '/bin/echo', SECRET_KEY: 'local-only' },
+      env: { SECRET_KEY: 'local-only' },
       network: {
         slug: 'sdk-local',
         endpoint: 'http://127.0.0.1:8700',
@@ -58,11 +60,14 @@ test('local API requires pairing token and stores SDK action config locally', as
     const actions = connector.listActions();
     assert.equal(actions.length, 1);
     assert.equal(actions[0].name, 'coco-one');
-    assert.equal(actions[0].runtime, 'coco');
+    assert.equal(actions[0].runtime, 'claude');
+    assert.equal(actions[0].model, 'claude-sonnet-4-5');
+    assert.equal(actions[0].description, 'Handles private channel coding tasks');
     assert.equal(actions[0].network, 'sdk-local');
     assert.deepEqual(actions[0].channels, ['u_owner_alpha']);
-    assert.equal(actions[0].env.COCO_BIN, '/bin/echo');
     assert.equal(actions[0].env.SECRET_KEY, 'local-only');
+    assert.equal(actions[0].instanceEnv.LLM_MODEL, 'claude-sonnet-4-5');
+    assert.equal(actions[0].instanceEnv.CLAUDE_MODEL, 'claude-sonnet-4-5');
 
     const networks = connector.config.getNetworks();
     assert.equal(networks.length, 1);

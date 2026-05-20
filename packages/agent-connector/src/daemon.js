@@ -598,6 +598,8 @@ class Daemon {
   _agentConfigFingerprint(agentCfg) {
     return JSON.stringify({
       type: this._getRuntimeType(agentCfg),
+      model: agentCfg.model || '',
+      description: agentCfg.description || '',
       network: agentCfg.network || '',
       env: agentCfg.env || {},
       path: agentCfg.path || '',

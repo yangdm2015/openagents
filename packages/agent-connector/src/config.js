@@ -58,12 +58,14 @@ class Config {
     fs.writeFileSync(this.configFile, serializeYaml(config), 'utf-8');
   }
 
-  addAgent({ name, type, role, path: agentPath, env, network, channels }) {
+  addAgent({ name, type, role, model, description, path: agentPath, env, network, channels }) {
     const config = this.load();
     if (config.agents.some((a) => a.name === name)) {
       throw new Error(`Agent '${name}' already exists`);
     }
     const entry = { name, type: type || 'openclaw', role: role || 'worker' };
+    if (model) entry.model = model;
+    if (description) entry.description = description;
     if (agentPath) entry.path = agentPath;
     if (network) entry.network = network;
     if (channels && channels.length > 0) entry.channels = channels;
@@ -112,13 +114,15 @@ class Config {
     return agent.env || {};
   }
 
-  addAction({ name, runtime, type, path: actionPath, env, network, channels }) {
+  addAction({ name, runtime, type, model, description, path: actionPath, env, network, channels }) {
     const config = this.load();
     config.actions = config.actions || [];
     if (config.actions.some((a) => a.name === name)) {
       throw new Error(`Action '${name}' already exists`);
     }
     const entry = { name, runtime: runtime || type || 'coco' };
+    if (model) entry.model = model;
+    if (description) entry.description = description;
     if (actionPath) entry.path = actionPath;
     if (network) entry.network = network;
     if (channels && channels.length > 0) entry.channels = channels;

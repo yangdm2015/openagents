@@ -32,9 +32,27 @@ interface LocalActionRecord {
   name: string
   runtime: string
   type?: string
+  model?: string | null
+  description?: string
   network?: string | null
   channels?: string[]
 }
+
+type RuntimeKind = "codex" | "claude" | "coco"
+
+const RUNTIME_OPTIONS: Array<{ value: RuntimeKind; label: string }> = [
+  { value: "codex", label: "Codex" },
+  { value: "claude", label: "Claude" },
+  { value: "coco", label: "Coco" },
+]
+
+const RUNTIME_MODELS: Record<RuntimeKind, string[]> = {
+  codex: ["gpt-5.1-codex", "gpt-5.1", "gpt-4.1"],
+  claude: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+  coco: ["coco-default"],
+}
+
+const selectClassName = "flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
 
 const LocalAgentsPanel: React.FC = () => {
   const location = useLocation()
@@ -47,7 +65,10 @@ const LocalAgentsPanel: React.FC = () => {
   const [loading, setLoading] = React.useState(false)
   const [channelName, setChannelName] = React.useState("private")
   const [channelDescription, setChannelDescription] = React.useState("")
-  const [actionName, setActionName] = React.useState("coco-one")
+  const [actionName, setActionName] = React.useState("my-agent")
+  const [actionDescription, setActionDescription] = React.useState("")
+  const [selectedRuntime, setSelectedRuntime] = React.useState<RuntimeKind>("codex")
+  const [selectedModel, setSelectedModel] = React.useState(RUNTIME_MODELS.codex[0])
   const [selectedChannelIds, setSelectedChannelIds] = React.useState<string[]>([])
   const [cocoBin, setCocoBin] = React.useState("coco")
   const [cocoArgs, setCocoArgs] = React.useState("")
@@ -94,6 +115,13 @@ const LocalAgentsPanel: React.FC = () => {
   }, [refresh])
 
   React.useEffect(() => {
+    const models = RUNTIME_MODELS[selectedRuntime]
+    if (!models.includes(selectedModel)) {
+      setSelectedModel(models[0])
+    }
+  }, [selectedRuntime, selectedModel])
+
+  React.useEffect(() => {
     if (!location.hash) return
     const target = document.querySelector(location.hash)
     if (target) {
@@ -127,12 +155,20 @@ const LocalAgentsPanel: React.FC = () => {
 
   const createAction = async () => {
     if (!actionName.trim()) return
+    const displayName = actionName.trim()
+    const description = actionDescription.trim()
     const created = await networkApi<{ agent: UserActionRecord }>("/api/user/agents", {
       method: "POST",
       body: JSON.stringify({
-        agent_id: actionName.trim(),
-        agent_type: "coco",
-        display_name: actionName.trim(),
+        agent_id: displayName,
+        agent_type: selectedRuntime,
+        display_name: displayName,
+        config: {
+          display_name: displayName,
+          description,
+          runtime: selectedRuntime,
+          model: selectedModel,
+        },
         channel_ids: selectedChannelIds,
       }),
     })
@@ -140,13 +176,18 @@ const LocalAgentsPanel: React.FC = () => {
       method: "POST",
     })
     if (settings.token) {
+      const runtimeEnv = selectedRuntime === "coco"
+        ? { COCO_BIN: cocoBin, COCO_ARGS: cocoArgs, COCO_WORKDIR: cocoWorkdir }
+        : {}
       await localConnectorFetch("/api/actions", settings, {
         method: "POST",
         body: JSON.stringify({
           name: created.agent.agent_id,
-          runtime: "coco",
+          runtime: selectedRuntime,
+          model: selectedModel,
+          description,
           path: cocoWorkdir || undefined,
-          env: { COCO_BIN: cocoBin, COCO_ARGS: cocoArgs, COCO_WORKDIR: cocoWorkdir },
+          env: runtimeEnv,
           network: {
             slug: "sdk-local",
             endpoint: `${selectedNetwork?.useHttps ? "https" : "http"}://${selectedNetwork?.host}:${selectedNetwork?.port}`,
@@ -155,9 +196,9 @@ const LocalAgentsPanel: React.FC = () => {
           },
         }),
       })
-      setStatus("Action saved to SDK network and local connector")
+      setStatus("Agent saved to SDK network and local connector")
     } else {
-      setStatus(`Action saved. Connect token: ${tokenData.connect_token.token}`)
+      setStatus(`Agent saved. Connect token: ${tokenData.connect_token.token}`)
     }
     await refresh()
   }
@@ -223,8 +264,20 @@ const LocalAgentsPanel: React.FC = () => {
         <section id="create-agent" className="scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-4">
           <div className="flex items-center gap-2 font-semibold text-gray-900 dark:text-gray-100"><Bot className="h-4 w-4" /> Create Agent</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="space-y-2"><Label>Action name</Label><Input value={actionName} onChange={(event) => setActionName(event.target.value)} /></div>
-            <div className="space-y-2"><Label>Runtime</Label><Input value="coco" disabled /></div>
+            <div className="space-y-2"><Label>Name</Label><Input value={actionName} onChange={(event) => setActionName(event.target.value)} /></div>
+            <div className="space-y-2"><Label>Description</Label><Input value={actionDescription} onChange={(event) => setActionDescription(event.target.value)} /></div>
+            <div className="space-y-2">
+              <Label>Runtime</Label>
+              <select className={selectClassName} value={selectedRuntime} onChange={(event) => setSelectedRuntime(event.target.value as RuntimeKind)}>
+                {RUNTIME_OPTIONS.map((runtime) => <option key={runtime.value} value={runtime.value}>{runtime.label}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <select className={selectClassName} value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+                {RUNTIME_MODELS[selectedRuntime].map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Bind private channels</Label>
@@ -239,7 +292,13 @@ const LocalAgentsPanel: React.FC = () => {
           </div>
           <Button onClick={createAction}>Create agent</Button>
           <div className="space-y-2">
-            {actions.map((action) => <div key={action.agent_id} className="rounded border border-gray-200 dark:border-gray-800 p-3"><div className="font-medium">{action.agent_id}</div><div className="text-sm text-gray-500">{action.agent_type}</div></div>)}
+            {actions.map((action) => (
+              <div key={action.agent_id} className="rounded border border-gray-200 dark:border-gray-800 p-3">
+                <div className="font-medium">{action.config?.display_name || action.agent_id}</div>
+                <div className="text-sm text-gray-500">{action.config?.runtime || action.agent_type}{action.config?.model ? ` / ${action.config.model}` : ""}</div>
+                {action.config?.description && <div className="text-xs text-gray-500 mt-1">{action.config.description}</div>}
+              </div>
+            ))}
           </div>
         </section>
 
@@ -247,7 +306,11 @@ const LocalAgentsPanel: React.FC = () => {
           <div className="font-semibold text-gray-900 dark:text-gray-100">Local connector actions</div>
           {localActions.map((action) => (
             <div key={action.name} className="flex items-center justify-between rounded border border-gray-200 dark:border-gray-800 p-3">
-              <div><div className="font-medium">{action.name}</div><div className="text-sm text-gray-500">{action.runtime || action.type || "coco"} / {action.network || "local"}</div></div>
+              <div>
+                <div className="font-medium">{action.name}</div>
+                <div className="text-sm text-gray-500">{action.runtime || action.type || "coco"}{action.model ? ` / ${action.model}` : ""} / {action.network || "local"}</div>
+                {action.description && <div className="text-xs text-gray-500 mt-1">{action.description}</div>}
+              </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => actionCommand(action.name, "start")}><Play className="h-4 w-4" /></Button>
                 <Button size="sm" variant="outline" onClick={() => actionCommand(action.name, "stop")}><Square className="h-4 w-4" /></Button>

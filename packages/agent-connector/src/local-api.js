@@ -93,6 +93,9 @@ class LocalApiServer {
     const body = await this._readJson(req);
     const name = body.name || body.agent_id;
     if (!name) return this._json(res, 400, { success: false, error: 'name is required' });
+    const runtime = this._normalizeRuntime(body.type || body.agent_type || body.runtime || 'coco');
+    const model = this._cleanText(body.model || (body.config && body.config.model));
+    const description = this._cleanText(body.description || (body.config && body.config.description));
 
     if (body.network) {
       const network = body.network;
@@ -110,10 +113,12 @@ class LocalApiServer {
 
     this.connector.addAgent({
       name,
-      type: body.type || body.agent_type || 'coco',
+      type: runtime,
       role: body.role || 'worker',
+      model,
+      description,
       path: body.path || body.workdir,
-      env: body.env || {},
+      env: this._envWithModel(runtime, body.env || {}, model),
       network: body.network ? (body.network.slug || body.network.id || 'sdk-local') : body.networkSlug,
       channels: (body.network && body.network.channels) || body.channels || [],
     });
@@ -127,16 +132,42 @@ class LocalApiServer {
     if (!name) return this._json(res, 400, { success: false, error: 'name is required' });
 
     const networkSlug = this._saveNetwork(body.network);
+    const runtime = this._normalizeRuntime(body.runtime || body.type || body.agent_type || 'coco');
+    const model = this._cleanText(body.model || (body.config && body.config.model));
+    const description = this._cleanText(body.description || (body.config && body.config.description));
     this.connector.addAction({
       name,
-      runtime: body.runtime || body.type || body.agent_type || 'coco',
+      runtime,
+      model,
+      description,
       path: body.path || body.workdir,
-      env: body.env || {},
+      env: this._envWithModel(runtime, body.env || {}, model),
       network: body.network ? networkSlug : body.networkSlug,
       channels: (body.network && body.network.channels) || body.channels || [],
     });
     try { this.connector.sendDaemonCommand('reload'); } catch {}
     return this._json(res, 200, { success: true, action: this.connector.config.getAction(name) });
+  }
+
+  _normalizeRuntime(runtime) {
+    const value = String(runtime || 'coco').trim().toLowerCase();
+    if (value === 'codex' || value === 'claude' || value === 'coco') return value;
+    return value || 'coco';
+  }
+
+  _cleanText(value) {
+    if (typeof value !== 'string') return '';
+    return value.trim();
+  }
+
+  _envWithModel(runtime, env, model) {
+    const merged = { ...(env || {}) };
+    if (!model) return merged;
+    merged.LLM_MODEL = model;
+    if (runtime === 'codex') merged.CODEX_MODEL = model;
+    if (runtime === 'claude') merged.CLAUDE_MODEL = model;
+    if (runtime === 'coco') merged.COCO_MODEL = model;
+    return merged;
   }
 
   _saveNetwork(network) {
