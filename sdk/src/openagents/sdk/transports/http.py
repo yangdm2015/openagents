@@ -188,6 +188,7 @@ class HttpTransport(Transport):
         self.app.router.add_post("/api/user/agents/{agent_id}/connect-token", self.create_user_agent_connect_token)
         self.app.router.add_get("/api/user/channels", self.list_user_channels)
         self.app.router.add_post("/api/user/channels", self.create_user_channel)
+        self.app.router.add_put("/api/user/channels/{channel_id}", self.update_user_channel)
         self.app.router.add_post("/api/register", self.register_agent)
         self.app.router.add_post("/api/unregister", self.unregister_agent)
         self.app.router.add_get("/api/poll", self.poll_messages)
@@ -892,27 +893,69 @@ class HttpTransport(Transport):
         data = await request.json()
         manager = self._workspace_manager()
         try:
-            channel = manager.create_user_channel(user["id"], data.get("name", ""), data.get("description", ""))
-            if self.network_instance:
-                mods = getattr(self.network_instance, "mods", {}) or {}
-                mod_values = mods.values() if isinstance(mods, dict) else mods
-                for mod in mod_values:
-                    create_channel = getattr(mod, "_create_channel", None)
-                    if callable(create_channel):
-                        try:
-                            create_channel(
-                                channel["channel_name"],
-                                channel.get("description") or channel["name"],
-                                visibility="private",
-                                owner_user_id=user["id"],
-                            )
-                        except TypeError:
-                            pass
+            channel = manager.create_user_channel(
+                user["id"],
+                data.get("name", ""),
+                data.get("description", ""),
+                agent_ids=data.get("agent_ids") or [],
+                primary_agent_id=data.get("primary_agent_id"),
+            )
+            self._sync_user_channel_to_mod(user["id"], channel)
             return web.json_response({"success": True, "channel": channel})
         except sqlite3.IntegrityError:
             return web.json_response({"success": False, "error_message": "channel already exists"}, status=409)
         except Exception as e:
             return web.json_response({"success": False, "error_message": str(e)}, status=400)
+
+    async def update_user_channel(self, request):
+        user = await self._auth_user(request)
+        if not user:
+            return self._auth_error()
+        data = await request.json()
+        channel_id = request.match_info.get("channel_id")
+        manager = self._workspace_manager()
+        try:
+            channel = manager.update_user_channel(
+                user["id"],
+                channel_id,
+                name=data.get("name") if "name" in data else None,
+                description=data.get("description") if "description" in data else None,
+                agent_ids=data.get("agent_ids") if "agent_ids" in data else None,
+                primary_agent_id=data.get("primary_agent_id") if "primary_agent_id" in data else None,
+            )
+            if not channel:
+                return web.json_response({"success": False, "error_message": "channel not found"}, status=404)
+            self._sync_user_channel_to_mod(user["id"], channel)
+            return web.json_response({"success": True, "channel": channel})
+        except sqlite3.IntegrityError:
+            return web.json_response({"success": False, "error_message": "channel already exists"}, status=409)
+        except Exception as e:
+            return web.json_response({"success": False, "error_message": str(e)}, status=400)
+
+    def _sync_user_channel_to_mod(self, user_id: str, channel: Dict[str, Any]) -> None:
+        if not self.network_instance:
+            return
+        mods = getattr(self.network_instance, "mods", {}) or {}
+        mod_values = mods.values() if isinstance(mods, dict) else mods
+        for mod in mod_values:
+            create_channel = getattr(mod, "_create_channel", None)
+            if callable(create_channel):
+                try:
+                    create_channel(
+                        channel["channel_name"],
+                        channel.get("description") or channel["name"],
+                        visibility="private",
+                        owner_user_id=user_id,
+                        participant_agent_ids=channel.get("agents") or [],
+                        primary_agent_id=channel.get("primary_agent_id"),
+                    )
+                except TypeError:
+                    create_channel(
+                        channel["channel_name"],
+                        channel.get("description") or channel["name"],
+                        visibility="private",
+                        owner_user_id=user_id,
+                    )
 
     async def register_agent(self, request):
         """Handle agent registration via HTTP."""

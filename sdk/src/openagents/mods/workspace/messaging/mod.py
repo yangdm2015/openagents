@@ -248,6 +248,8 @@ class ThreadMessagingNetworkMod(BaseMod):
         description: str = "",
         visibility: str = "public",
         owner_user_id: Optional[str] = None,
+        participant_agent_ids: Optional[List[str]] = None,
+        primary_agent_id: Optional[str] = None,
     ) -> None:
         """Create a new channel.
 
@@ -264,6 +266,8 @@ class ThreadMessagingNetworkMod(BaseMod):
                 "description": description,
                 "visibility": visibility or "public",
                 "owner_user_id": owner_user_id,
+                "participant_agent_ids": list(participant_agent_ids or []),
+                "primary_agent_id": primary_agent_id,
                 "created_timestamp": int(time.time()),
                 "message_count": 0,
                 "thread_count": 0,
@@ -271,12 +275,30 @@ class ThreadMessagingNetworkMod(BaseMod):
 
             # Create channel in EventGateway (single source of truth for membership)
             self.network.event_gateway.create_channel(channel_name)
+            self._sync_private_channel_participants(channel_name)
             logger.info(f"Created channel: {channel_name}")
         else:
             info = self.channels[channel_name]
             info.setdefault("visibility", visibility or "public")
             if owner_user_id and not info.get("owner_user_id"):
                 info["owner_user_id"] = owner_user_id
+            if participant_agent_ids is not None:
+                info["participant_agent_ids"] = list(participant_agent_ids or [])
+            if primary_agent_id is not None:
+                info["primary_agent_id"] = primary_agent_id
+            self._sync_private_channel_participants(channel_name)
+
+    def _sync_private_channel_participants(self, channel_name: str) -> None:
+        channel_info = self.channels.get(channel_name) or {}
+        if channel_info.get("visibility") != "private":
+            return
+        for agent_id in channel_info.get("participant_agent_ids") or []:
+            metadata = self.agent_metadata.setdefault(agent_id, {})
+            private_channels = metadata.setdefault("private_channels", [])
+            if channel_name not in private_channels:
+                private_channels.append(channel_name)
+            if agent_id in self.active_agents:
+                self.network.event_gateway.add_channel_member(channel_name, agent_id)
 
     def _source_can_access_channel(self, source_id: Optional[str], channel_name: str) -> bool:
         channel_info = self.channels.get(channel_name)
@@ -286,6 +308,8 @@ class ThreadMessagingNetworkMod(BaseMod):
             return True
 
         metadata = self.agent_metadata.get(_bare_agent_id(source_id or ""), {})
+        if _bare_agent_id(source_id or "") in (channel_info.get("participant_agent_ids") or []):
+            return True
         if channel_name in (metadata.get("private_channels") or []):
             return True
 
@@ -332,6 +356,8 @@ class ThreadMessagingNetworkMod(BaseMod):
                 channel.get("description") or channel.get("name") or "Private channel",
                 visibility="private",
                 owner_user_id=channel.get("user_id"),
+                participant_agent_ids=channel.get("agents") or [],
+                primary_agent_id=channel.get("primary_agent_id"),
             )
 
     def _setup_file_storage(self):
@@ -1308,15 +1334,29 @@ class ThreadMessagingNetworkMod(BaseMod):
             message: The channel message to broadcast
         """
         channel = ChannelMessage.get_channel(message)
+        channel_info = self.channels.get(channel, {})
+        source_metadata = self.agent_metadata.get(_bare_agent_id(message.source_id or ""), {})
+        if source_metadata.get("platform") == "local-connector":
+            logger.info(
+                f"Skipping agent-authored channel message dispatch in {channel} from {message.source_id}"
+            )
+            return
 
-        # Get all agents in the channel from EventGateway
-        channel_members = self.network.event_gateway.get_channel_members(channel)
-        channel_agents = set(channel_members)
+        claimed_agent_id = self._claim_channel_message(message, channel, channel_info)
+        if claimed_agent_id:
+            notify_agents = {claimed_agent_id}
+        else:
+            participant_agent_ids = set(channel_info.get("participant_agent_ids") or [])
+            if participant_agent_ids:
+                notify_agents = set()
+            else:
+                # Legacy public channels without explicit participants keep existing broadcast behavior.
+                channel_members = self.network.event_gateway.get_channel_members(channel)
+                notify_agents = set(channel_members) - {message.source_id}
 
-        # Remove the sender from the notification list (they already know about their message)
-        notify_agents = channel_agents - {message.source_id}
+        notify_agents.discard(message.source_id)
 
-        logger.info(f"Channel {channel} has agents: {channel_agents}")
+        logger.info(f"Channel {channel} claimed by: {claimed_agent_id or 'none'}")
         logger.info(f"Message sender: {message.source_id}")
         logger.info(f"Agents to notify: {notify_agents}")
 
@@ -1371,6 +1411,36 @@ class ThreadMessagingNetworkMod(BaseMod):
                 import traceback
 
                 traceback.print_exc()
+
+    def _claim_channel_message(
+        self,
+        message: Event,
+        channel: str,
+        channel_info: Dict[str, Any],
+    ) -> Optional[str]:
+        participant_agent_ids = list(channel_info.get("participant_agent_ids") or [])
+        if not participant_agent_ids:
+            return None
+
+        owner_user_id = channel_info.get("owner_user_id")
+        workspace_manager = getattr(self.network, "workspace_manager", None)
+        if owner_user_id and workspace_manager and hasattr(workspace_manager, "claim_user_channel_message"):
+            claim = workspace_manager.claim_user_channel_message(
+                owner_user_id,
+                channel,
+                message.event_id,
+                active_agent_ids=set(self.active_agents),
+            )
+            if claim:
+                return claim.get("claimed_agent_id")
+
+        primary = channel_info.get("primary_agent_id")
+        if primary and primary in self.active_agents:
+            return primary
+        for agent_id in participant_agent_ids:
+            if agent_id in self.active_agents:
+                return agent_id
+        return primary or (participant_agent_ids[0] if participant_agent_ids else None)
 
     async def _process_direct_message(self, message: Event) -> None:
         """Process a direct message.

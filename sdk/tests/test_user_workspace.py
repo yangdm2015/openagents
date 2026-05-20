@@ -155,6 +155,51 @@ class UserWorkspaceTests(unittest.TestCase):
             )
         )
 
+    def test_channel_participants_primary_and_claims_are_user_scoped(self):
+        user = self.workspace.upsert_sso_user(
+            "bytedance",
+            "owner",
+            bytecloud_profile("owner"),
+        )
+        other = self.workspace.upsert_sso_user(
+            "bytedance",
+            "other",
+            bytecloud_profile("other"),
+        )
+        self.workspace.save_user_agent(user["id"], "codex-one", "codex", {})
+        self.workspace.save_user_agent(user["id"], "coco-one", "coco", {})
+        self.workspace.save_user_agent(other["id"], "other-agent", "coco", {})
+
+        channel = self.workspace.create_user_channel(
+            user["id"],
+            "alpha",
+            "A only",
+            agent_ids=["codex-one", "coco-one", "other-agent"],
+            primary_agent_id="coco-one",
+        )
+
+        self.assertEqual(channel["primary_agent_id"], "coco-one")
+        self.assertEqual(channel["agents"], ["codex-one", "coco-one"])
+        listed = self.workspace.list_user_channels(user["id"])
+        self.assertEqual(listed[0]["primary_agent_id"], "coco-one")
+        self.assertEqual(listed[0]["agents"], ["codex-one", "coco-one"])
+
+        first_claim = self.workspace.claim_user_channel_message(
+            user["id"],
+            channel["channel_name"],
+            "message-1",
+            active_agent_ids={"codex-one"},
+        )
+        self.assertEqual(first_claim["claimed_agent_id"], "codex-one")
+
+        repeated_claim = self.workspace.claim_user_channel_message(
+            user["id"],
+            channel["channel_name"],
+            "message-1",
+            active_agent_ids={"coco-one"},
+        )
+        self.assertEqual(repeated_claim["claimed_agent_id"], "codex-one")
+
 
 if __name__ == "__main__":
     unittest.main()

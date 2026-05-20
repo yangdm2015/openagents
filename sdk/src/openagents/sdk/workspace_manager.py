@@ -16,7 +16,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Set, Union
 from contextlib import contextmanager
 
 from openagents.models.event import Event
@@ -193,10 +193,24 @@ class WorkspaceManager:
                     user_id TEXT NOT NULL,
                     agent_id TEXT NOT NULL,
                     channel_id TEXT NOT NULL,
+                    is_primary BOOLEAN DEFAULT FALSE,
                     created_at REAL NOT NULL,
                     PRIMARY KEY (user_id, agent_id, channel_id),
                     FOREIGN KEY (user_id, agent_id) REFERENCES user_agents (user_id, agent_id),
                     FOREIGN KEY (channel_id) REFERENCES user_channels (id)
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_channel_message_claims (
+                    message_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    channel_name TEXT NOT NULL,
+                    claimed_agent_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'claimed',
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             """
             )
@@ -220,6 +234,7 @@ class WorkspaceManager:
             self._ensure_column(cursor, "users", "username", "TEXT")
             self._ensure_column(cursor, "users", "raw_profile", "TEXT")
             self._ensure_column(cursor, "users", "updated_at", "REAL")
+            self._ensure_column(cursor, "user_agent_channels", "is_primary", "BOOLEAN DEFAULT FALSE")
 
             # Create indexes for performance
             cursor.execute(
@@ -248,6 +263,15 @@ class WorkspaceManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_user_channels_user ON user_channels(user_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_agent_channels_channel ON user_agent_channels(user_id, channel_id)"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_agent_channels_primary ON user_agent_channels(user_id, channel_id) WHERE is_primary = TRUE"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_channel_claims_user_channel ON user_channel_message_claims(user_id, channel_name)"
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_connect_tokens_user_agent ON user_agent_connect_tokens(user_id, agent_id)"
@@ -513,7 +537,14 @@ class WorkspaceManager:
     def _private_channel_name(self, user_id: str, name: str) -> str:
         return f"u_{user_id.replace('-', '')[:12]}_{self._channel_slug(name)}"
 
-    def create_user_channel(self, user_id: str, name: str, description: str = "") -> Dict[str, Any]:
+    def create_user_channel(
+        self,
+        user_id: str,
+        name: str,
+        description: str = "",
+        agent_ids: Optional[List[str]] = None,
+        primary_agent_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if not self._initialized:
             raise RuntimeError("Workspace not initialized")
         clean_name = (name or "").strip()
@@ -545,6 +576,9 @@ class WorkspaceManager:
                 ),
             )
             conn.commit()
+        self.set_user_channel_agents(user_id, channel["id"], agent_ids or [], primary_agent_id)
+        channel["agents"] = self.list_user_channel_agent_ids(user_id, channel["id"])
+        channel["primary_agent_id"] = self.get_user_channel_primary_agent(user_id, channel["id"])
         return channel
 
     def list_user_channels(self, user_id: str) -> List[Dict[str, Any]]:
@@ -553,7 +587,7 @@ class WorkspaceManager:
         with self._get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM user_channels WHERE user_id = ? ORDER BY created_at", (user_id,))
-            return [dict(row) for row in cursor.fetchall()]
+            return [self._enrich_user_channel(dict(row)) for row in cursor.fetchall()]
 
     def list_all_user_channels(self) -> List[Dict[str, Any]]:
         if not self._initialized:
@@ -561,7 +595,7 @@ class WorkspaceManager:
         with self._get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM user_channels ORDER BY created_at")
-            return [dict(row) for row in cursor.fetchall()]
+            return [self._enrich_user_channel(dict(row)) for row in cursor.fetchall()]
 
     def get_user_channel(self, user_id: str, channel_id: str) -> Optional[Dict[str, Any]]:
         if not self._initialized:
@@ -572,7 +606,8 @@ class WorkspaceManager:
                 "SELECT * FROM user_channels WHERE user_id = ? AND id = ?",
                 (user_id, channel_id),
             )
-            return self._row_to_dict(cursor.fetchone())
+            row = self._row_to_dict(cursor.fetchone())
+            return self._enrich_user_channel(row) if row else None
 
     def get_user_channel_by_internal_name(self, channel_name: str) -> Optional[Dict[str, Any]]:
         if not self._initialized:
@@ -580,9 +615,10 @@ class WorkspaceManager:
         with self._get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM user_channels WHERE channel_name = ?", (channel_name,))
-            return self._row_to_dict(cursor.fetchone())
+            row = self._row_to_dict(cursor.fetchone())
+            return self._enrich_user_channel(row) if row else None
 
-    def bind_user_agent_channel(self, user_id: str, agent_id: str, channel_id: str) -> bool:
+    def bind_user_agent_channel(self, user_id: str, agent_id: str, channel_id: str, is_primary: bool = False) -> bool:
         if not self._initialized:
             return False
         now = self._now()
@@ -600,12 +636,19 @@ class WorkspaceManager:
             )
             if not cursor.fetchone():
                 return False
+            if is_primary:
+                cursor.execute(
+                    "UPDATE user_agent_channels SET is_primary = FALSE WHERE user_id = ? AND channel_id = ?",
+                    (user_id, channel_id),
+                )
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO user_agent_channels (user_id, agent_id, channel_id, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO user_agent_channels (user_id, agent_id, channel_id, is_primary, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, agent_id, channel_id) DO UPDATE SET
+                    is_primary = excluded.is_primary
                 """,
-                (user_id, agent_id, channel_id, now),
+                (user_id, agent_id, channel_id, bool(is_primary), now),
             )
             conn.commit()
             return True
@@ -627,13 +670,212 @@ class WorkspaceManager:
                 if cursor.fetchone():
                     cursor.execute(
                         """
-                        INSERT OR IGNORE INTO user_agent_channels (user_id, agent_id, channel_id, created_at)
-                        VALUES (?, ?, ?, ?)
+                        INSERT OR IGNORE INTO user_agent_channels (user_id, agent_id, channel_id, is_primary, created_at)
+                        VALUES (?, ?, ?, FALSE, ?)
                         """,
                         (user_id, agent_id, channel_id, self._now()),
                     )
             conn.commit()
         return True
+
+    def update_user_channel(
+        self,
+        user_id: str,
+        channel_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        agent_ids: Optional[List[str]] = None,
+        primary_agent_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not self._initialized:
+            return None
+        updates = []
+        params: List[Any] = []
+        if name is not None:
+            clean_name = name.strip()
+            if not clean_name:
+                raise ValueError("channel name is required")
+            updates.append("name = ?")
+            params.append(clean_name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description or "")
+        if updates:
+            params.extend([user_id, channel_id])
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE user_channels SET {', '.join(updates)} WHERE user_id = ? AND id = ?",
+                    params,
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return None
+        if agent_ids is not None or primary_agent_id is not None:
+            current_agents = self.list_user_channel_agent_ids(user_id, channel_id)
+            self.set_user_channel_agents(
+                user_id,
+                channel_id,
+                current_agents if agent_ids is None else agent_ids,
+                primary_agent_id,
+            )
+        return self.get_user_channel(user_id, channel_id)
+
+    def set_user_channel_agents(
+        self,
+        user_id: str,
+        channel_id: str,
+        agent_ids: List[str],
+        primary_agent_id: Optional[str] = None,
+    ) -> bool:
+        if not self._initialized:
+            return False
+        ordered_agent_ids = []
+        for agent_id in agent_ids or []:
+            if agent_id and agent_id not in ordered_agent_ids:
+                ordered_agent_ids.append(agent_id)
+        if primary_agent_id and primary_agent_id not in ordered_agent_ids:
+            ordered_agent_ids.append(primary_agent_id)
+
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM user_channels WHERE user_id = ? AND id = ?",
+                (user_id, channel_id),
+            )
+            if not cursor.fetchone():
+                return False
+
+            valid_agent_ids = []
+            for agent_id in ordered_agent_ids:
+                cursor.execute(
+                    "SELECT 1 FROM user_agents WHERE user_id = ? AND agent_id = ?",
+                    (user_id, agent_id),
+                )
+                if cursor.fetchone():
+                    valid_agent_ids.append(agent_id)
+
+            primary = primary_agent_id if primary_agent_id in valid_agent_ids else None
+            cursor.execute(
+                "DELETE FROM user_agent_channels WHERE user_id = ? AND channel_id = ?",
+                (user_id, channel_id),
+            )
+            now = self._now()
+            for index, agent_id in enumerate(valid_agent_ids):
+                cursor.execute(
+                    """
+                    INSERT INTO user_agent_channels (user_id, agent_id, channel_id, is_primary, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, agent_id, channel_id, agent_id == primary, now + index * 0.001),
+                )
+            conn.commit()
+        return True
+
+    def list_user_channel_agent_ids(self, user_id: str, channel_id: str) -> List[str]:
+        if not self._initialized:
+            return []
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT agent_id FROM user_agent_channels
+                WHERE user_id = ? AND channel_id = ?
+                ORDER BY created_at, agent_id
+                """,
+                (user_id, channel_id),
+            )
+            return [row["agent_id"] for row in cursor.fetchall()]
+
+    def get_user_channel_primary_agent(self, user_id: str, channel_id: str) -> Optional[str]:
+        if not self._initialized:
+            return None
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT agent_id FROM user_agent_channels
+                WHERE user_id = ? AND channel_id = ? AND is_primary = TRUE
+                ORDER BY created_at, agent_id
+                LIMIT 1
+                """,
+                (user_id, channel_id),
+            )
+            row = cursor.fetchone()
+            return row["agent_id"] if row else None
+
+    def _enrich_user_channel(self, channel: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not channel:
+            return None
+        channel = dict(channel)
+        channel["agents"] = self.list_user_channel_agent_ids(channel["user_id"], channel["id"])
+        channel["primary_agent_id"] = self.get_user_channel_primary_agent(channel["user_id"], channel["id"])
+        return channel
+
+    def claim_user_channel_message(
+        self,
+        user_id: str,
+        channel_name: str,
+        message_id: str,
+        active_agent_ids: Optional[Set[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not self._initialized or not user_id or not channel_name or not message_id:
+            return None
+        active_agent_ids = set(active_agent_ids or set())
+        with self._get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM user_channel_message_claims WHERE message_id = ?",
+                (message_id,),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                return dict(existing)
+
+            cursor.execute(
+                "SELECT * FROM user_channels WHERE user_id = ? AND channel_name = ?",
+                (user_id, channel_name),
+            )
+            channel = cursor.fetchone()
+            if not channel:
+                return None
+
+            cursor.execute(
+                """
+                SELECT agent_id, is_primary FROM user_agent_channels
+                WHERE user_id = ? AND channel_id = ?
+                ORDER BY created_at, agent_id
+                """,
+                (user_id, channel["id"]),
+            )
+            rows = cursor.fetchall()
+            agent_ids = [row["agent_id"] for row in rows]
+            if not agent_ids:
+                return None
+            primary = next((row["agent_id"] for row in rows if row["is_primary"]), None)
+            winner = None
+            if primary and (not active_agent_ids or primary in active_agent_ids):
+                winner = primary
+            if not winner and active_agent_ids:
+                winner = next((agent_id for agent_id in agent_ids if agent_id in active_agent_ids), None)
+            if not winner:
+                winner = agent_ids[0]
+
+            now = self._now()
+            cursor.execute(
+                """
+                INSERT INTO user_channel_message_claims
+                    (message_id, user_id, channel_name, claimed_agent_id, status, created_at)
+                VALUES (?, ?, ?, ?, 'claimed', ?)
+                """,
+                (message_id, user_id, channel_name, winner, now),
+            )
+            conn.commit()
+            cursor.execute(
+                "SELECT * FROM user_channel_message_claims WHERE message_id = ?",
+                (message_id,),
+            )
+            return dict(cursor.fetchone())
 
     def list_user_agent_channel_names(self, user_id: str, agent_id: str) -> List[str]:
         if not self._initialized:

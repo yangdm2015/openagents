@@ -26,6 +26,8 @@ interface UserChannelRecord {
   name: string
   channel_name: string
   description?: string
+  agents?: string[]
+  primary_agent_id?: string | null
 }
 
 type RuntimeConfig = {
@@ -129,6 +131,12 @@ const LocalAgentsPanel: React.FC = () => {
   const [selectedChannelId, setSelectedChannelId] = React.useState("")
   const [channelName, setChannelName] = React.useState("private")
   const [channelDescription, setChannelDescription] = React.useState("")
+  const [channelAgentIds, setChannelAgentIds] = React.useState<string[]>([])
+  const [channelPrimaryAgentId, setChannelPrimaryAgentId] = React.useState("")
+  const [channelEditName, setChannelEditName] = React.useState("")
+  const [channelEditDescription, setChannelEditDescription] = React.useState("")
+  const [channelEditAgentIds, setChannelEditAgentIds] = React.useState<string[]>([])
+  const [channelEditPrimaryAgentId, setChannelEditPrimaryAgentId] = React.useState("")
   const [actionName, setActionName] = React.useState("my-agent")
   const [actionDescription, setActionDescription] = React.useState("")
   const [selectedRuntime, setSelectedRuntime] = React.useState<RuntimeKind>("codex")
@@ -264,10 +272,35 @@ const LocalAgentsPanel: React.FC = () => {
     [channels, selectedChannelId]
   )
 
+  React.useEffect(() => {
+    if (!selectedChannel) return
+    setChannelEditName(selectedChannel.name)
+    setChannelEditDescription(selectedChannel.description || "")
+    setChannelEditAgentIds(selectedChannel.agents || [])
+    setChannelEditPrimaryAgentId(selectedChannel.primary_agent_id || "")
+  }, [selectedChannel])
+
+  React.useEffect(() => {
+    if (channelPrimaryAgentId && !channelAgentIds.includes(channelPrimaryAgentId)) {
+      setChannelPrimaryAgentId("")
+    }
+  }, [channelAgentIds, channelPrimaryAgentId])
+
+  React.useEffect(() => {
+    if (channelEditPrimaryAgentId && !channelEditAgentIds.includes(channelEditPrimaryAgentId)) {
+      setChannelEditPrimaryAgentId("")
+    }
+  }, [channelEditAgentIds, channelEditPrimaryAgentId])
+
   const selectedLocalAction = React.useMemo(
     () => localActions.find((action) => action.name === selectedAgent?.agent_id),
     [localActions, selectedAgent]
   )
+
+  const agentName = React.useCallback((agentId: string) => {
+    const agent = actions.find((item) => item.agent_id === agentId)
+    return agent ? agentTitle(agent) : agentId
+  }, [actions])
 
   const saveConnector = () => {
     saveLocalConnectorSettings(settings)
@@ -276,13 +309,37 @@ const LocalAgentsPanel: React.FC = () => {
 
   const createChannel = async () => {
     if (!channelName.trim()) return
-    await networkApi("/api/user/channels", {
+    const data = await networkApi<{ channel: UserChannelRecord }>("/api/user/channels", {
       method: "POST",
-      body: JSON.stringify({ name: channelName.trim(), description: channelDescription.trim() }),
+      body: JSON.stringify({
+        name: channelName.trim(),
+        description: channelDescription.trim(),
+        agent_ids: channelAgentIds,
+        primary_agent_id: channelPrimaryAgentId || null,
+      }),
     })
     setChannelName("")
     setChannelDescription("")
+    setChannelAgentIds([])
+    setChannelPrimaryAgentId("")
+    setSelectedChannelId(data.channel.id)
     setActivePanel("channels")
+    await refresh()
+  }
+
+  const updateChannel = async () => {
+    if (!selectedChannel || !channelEditName.trim()) return
+    const data = await networkApi<{ channel: UserChannelRecord }>(`/api/user/channels/${encodeURIComponent(selectedChannel.id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: channelEditName.trim(),
+        description: channelEditDescription.trim(),
+        agent_ids: channelEditAgentIds,
+        primary_agent_id: channelEditPrimaryAgentId || null,
+      }),
+    })
+    setSelectedChannelId(data.channel.id)
+    setStatus("Channel saved")
     await refresh()
   }
 
@@ -375,6 +432,46 @@ const LocalAgentsPanel: React.FC = () => {
   const toggleChannel = (id: string) => {
     setSelectedChannelIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
+
+  const toggleAgentInList = (agentId: string, setter: React.Dispatch<React.SetStateAction<string[]>>) => {
+    setter((current) => current.includes(agentId) ? current.filter((item) => item !== agentId) : [...current, agentId])
+  }
+
+  const renderAgentPicker = (
+    selectedIds: string[],
+    setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>,
+    primaryId: string,
+    setPrimaryId: React.Dispatch<React.SetStateAction<string>>,
+  ) => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Participating Agents</Label>
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {actions.map((agent) => (
+            <label key={agent.agent_id} className="flex min-h-10 items-center gap-2 border-2 border-zinc-900 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(agent.agent_id)}
+                onChange={() => toggleAgentInList(agent.agent_id, setSelectedIds)}
+              />
+              <span className="min-w-0 flex-1 truncate">{agentTitle(agent)}</span>
+              <span className="text-xs text-zinc-500">{runtimeLabel(agentRuntime(agent))}</span>
+            </label>
+          ))}
+          {actions.length === 0 && <div className="text-sm text-zinc-500">No agents yet</div>}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Primary Agent</Label>
+        <select className={selectClassName} value={primaryId} onChange={(event) => setPrimaryId(event.target.value)} disabled={selectedIds.length === 0}>
+          <option value="">Auto claim</option>
+          {selectedIds.map((agentId) => (
+            <option key={agentId} value={agentId}>{agentName(agentId)}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
 
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[#f7f2e8] text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
@@ -672,11 +769,42 @@ const LocalAgentsPanel: React.FC = () => {
                       <div className="text-sm text-zinc-500">{selectedChannel.channel_name}</div>
                     </div>
                     {selectedChannel.description && <div className="text-sm">{selectedChannel.description}</div>}
+                    <div>
+                      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Primary Agent</div>
+                      <div className="text-sm">{selectedChannel.primary_agent_id ? agentName(selectedChannel.primary_agent_id) : "Auto claim"}</div>
+                    </div>
+                    <div>
+                      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Participating Agents</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(selectedChannel.agents || []).map((agentId) => (
+                          <span key={agentId} className="border border-zinc-900 px-2 py-1 text-xs dark:border-zinc-700">{agentName(agentId)}</span>
+                        ))}
+                        {(!selectedChannel.agents || selectedChannel.agents.length === 0) && <span className="text-sm text-zinc-500">None</span>}
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="text-sm text-zinc-500">No channel selected</div>
                 )}
               </section>
+
+              {selectedChannel && (
+                <section className="space-y-5 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
+                  <div className="text-sm font-bold uppercase tracking-wide text-zinc-500">Edit Channel</div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Name</Label>
+                      <Input value={channelEditName} onChange={(event) => setChannelEditName(event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Input value={channelEditDescription} onChange={(event) => setChannelEditDescription(event.target.value)} />
+                    </div>
+                  </div>
+                  {renderAgentPicker(channelEditAgentIds, setChannelEditAgentIds, channelEditPrimaryAgentId, setChannelEditPrimaryAgentId)}
+                  <Button onClick={updateChannel}>Save channel</Button>
+                </section>
+              )}
 
               <section id="create-channel" className="space-y-5 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
                 <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
@@ -693,6 +821,7 @@ const LocalAgentsPanel: React.FC = () => {
                     <Input value={channelDescription} onChange={(event) => setChannelDescription(event.target.value)} />
                   </div>
                 </div>
+                {renderAgentPicker(channelAgentIds, setChannelAgentIds, channelPrimaryAgentId, setChannelPrimaryAgentId)}
                 <Button onClick={createChannel}>Create channel</Button>
               </section>
             </div>
