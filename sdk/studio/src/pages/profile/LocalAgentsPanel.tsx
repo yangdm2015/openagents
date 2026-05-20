@@ -37,6 +37,20 @@ type RuntimeConfig = {
   workdir?: string
 }
 
+type RuntimeModelOption = {
+  value: string
+  label?: string
+  default_reasoning?: string
+  reasoning_efforts?: string[]
+}
+
+type RuntimeOptionRecord = {
+  runtime: RuntimeKind
+  models: RuntimeModelOption[]
+  default_model?: string
+  source?: string
+}
+
 interface LocalActionRecord {
   name: string
   runtime: string
@@ -57,13 +71,23 @@ const RUNTIME_OPTIONS: Array<{ value: RuntimeKind; label: string }> = [
   { value: "coco", label: "Coco" },
 ]
 
-const RUNTIME_MODELS: Record<RuntimeKind, string[]> = {
-  codex: ["gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1", "gpt-5", "gpt-4.1"],
-  claude: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
-  coco: ["coco-default"],
+const FALLBACK_RUNTIME_MODELS: Record<RuntimeKind, RuntimeModelOption[]> = {
+  codex: [
+    { value: "gpt-5.5", label: "GPT-5.5", default_reasoning: "medium", reasoning_efforts: ["low", "medium", "high", "xhigh"] },
+    { value: "gpt-5.4", label: "gpt-5.4", default_reasoning: "medium", reasoning_efforts: ["low", "medium", "high", "xhigh"] },
+    { value: "gpt-5.4-mini", label: "GPT-5.4-Mini", default_reasoning: "medium", reasoning_efforts: ["low", "medium", "high", "xhigh"] },
+    { value: "gpt-5.3-codex", label: "gpt-5.3-codex", default_reasoning: "medium", reasoning_efforts: ["low", "medium", "high", "xhigh"] },
+    { value: "gpt-5.2", label: "gpt-5.2", default_reasoning: "medium", reasoning_efforts: ["low", "medium", "high", "xhigh"] },
+  ],
+  claude: [
+    { value: "claude-sonnet-4-5", label: "claude-sonnet-4-5" },
+    { value: "claude-opus-4-1", label: "claude-opus-4-1" },
+    { value: "claude-haiku-4-5", label: "claude-haiku-4-5" },
+  ],
+  coco: [{ value: "GPT-5.5", label: "GPT-5.5" }],
 }
 
-const CODEX_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"]
+const CODEX_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"]
 const CODEX_VERBOSITY_OPTIONS = ["low", "medium", "high"]
 
 const selectClassName = "flex h-10 w-full border-2 border-zinc-900 bg-white px-3 py-2 text-sm text-zinc-950 outline-none focus:ring-2 focus:ring-yellow-300 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
@@ -96,6 +120,7 @@ const LocalAgentsPanel: React.FC = () => {
   const [actions, setActions] = React.useState<UserActionRecord[]>([])
   const [channels, setChannels] = React.useState<UserChannelRecord[]>([])
   const [localActions, setLocalActions] = React.useState<LocalActionRecord[]>([])
+  const [runtimeOptions, setRuntimeOptions] = React.useState<Partial<Record<RuntimeKind, RuntimeOptionRecord>>>({})
   const [settings, setSettings] = React.useState<LocalConnectorSettings>(() => getLocalConnectorSettings())
   const [status, setStatus] = React.useState("")
   const [loading, setLoading] = React.useState(false)
@@ -107,7 +132,7 @@ const LocalAgentsPanel: React.FC = () => {
   const [actionName, setActionName] = React.useState("my-agent")
   const [actionDescription, setActionDescription] = React.useState("")
   const [selectedRuntime, setSelectedRuntime] = React.useState<RuntimeKind>("codex")
-  const [selectedModel, setSelectedModel] = React.useState(RUNTIME_MODELS.codex[0])
+  const [selectedModel, setSelectedModel] = React.useState(FALLBACK_RUNTIME_MODELS.codex[0].value)
   const [codexReasoningEffort, setCodexReasoningEffort] = React.useState("medium")
   const [codexVerbosity, setCodexVerbosity] = React.useState("medium")
   const [claudeMaxTurns, setClaudeMaxTurns] = React.useState("")
@@ -142,10 +167,21 @@ const LocalAgentsPanel: React.FC = () => {
       setActions(actionData.agents || [])
       setChannels(channelData.channels || [])
       if (settings.token) {
-        const localData = await localConnectorFetch<{ actions: LocalActionRecord[] }>("/api/actions", settings)
+        const [localData, runtimeData] = await Promise.all([
+          localConnectorFetch<{ actions: LocalActionRecord[] }>("/api/actions", settings),
+          localConnectorFetch<{ runtimes: RuntimeOptionRecord[] }>("/api/runtime-options", settings).catch(() => ({ runtimes: [] })),
+        ])
+        const nextRuntimeOptions: Partial<Record<RuntimeKind, RuntimeOptionRecord>> = {}
+        for (const item of runtimeData.runtimes || []) {
+          if (item.runtime === "codex" || item.runtime === "claude" || item.runtime === "coco") {
+            nextRuntimeOptions[item.runtime] = { ...item, models: item.models || [] }
+          }
+        }
         setLocalActions(localData.actions || [])
+        setRuntimeOptions(nextRuntimeOptions)
       } else {
         setLocalActions([])
+        setRuntimeOptions({})
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Refresh failed")
@@ -158,12 +194,35 @@ const LocalAgentsPanel: React.FC = () => {
     refresh()
   }, [refresh])
 
+  const currentModelOptions = React.useMemo(() => {
+    const localModels = runtimeOptions[selectedRuntime]?.models || []
+    return localModels.length > 0 ? localModels : FALLBACK_RUNTIME_MODELS[selectedRuntime]
+  }, [runtimeOptions, selectedRuntime])
+
+  const selectedModelOption = React.useMemo(
+    () => currentModelOptions.find((model) => model.value === selectedModel) || currentModelOptions[0],
+    [currentModelOptions, selectedModel]
+  )
+
+  const currentReasoningEfforts = React.useMemo(() => {
+    return selectedModelOption?.reasoning_efforts && selectedModelOption.reasoning_efforts.length > 0
+      ? selectedModelOption.reasoning_efforts
+      : CODEX_REASONING_EFFORTS
+  }, [selectedModelOption])
+
   React.useEffect(() => {
-    const models = RUNTIME_MODELS[selectedRuntime]
-    if (!models.includes(selectedModel)) {
-      setSelectedModel(models[0])
+    if (currentModelOptions.length === 0) return
+    if (!currentModelOptions.some((model) => model.value === selectedModel)) {
+      setSelectedModel(currentModelOptions[0].value)
     }
-  }, [selectedRuntime, selectedModel])
+  }, [currentModelOptions, selectedModel])
+
+  React.useEffect(() => {
+    if (selectedRuntime !== "codex") return
+    if (!currentReasoningEfforts.includes(codexReasoningEffort)) {
+      setCodexReasoningEffort(currentReasoningEfforts[0] || "medium")
+    }
+  }, [selectedRuntime, currentReasoningEfforts, codexReasoningEffort])
 
   React.useEffect(() => {
     if (actions.length === 0) {
@@ -319,7 +378,7 @@ const LocalAgentsPanel: React.FC = () => {
 
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[#f7f2e8] text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
-      <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)_380px]">
+      <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className={`${paneClassName} flex min-h-[220px] flex-col border-b-2 xl:border-b-0 xl:border-r-2`}>
           <div className="flex h-16 items-center justify-between border-b-2 border-zinc-900 px-5 dark:border-zinc-700">
             <div className="flex items-center gap-2 text-lg font-bold">
@@ -415,7 +474,7 @@ const LocalAgentsPanel: React.FC = () => {
           </div>
         </aside>
 
-        <main className={`${paneClassName} min-h-0 overflow-y-auto border-b-2 xl:border-b-0 xl:border-r-2`}>
+        <main className={`${paneClassName} min-h-0 overflow-y-auto`}>
           <div className="flex h-16 items-center justify-between border-b-2 border-zinc-900 px-6 dark:border-zinc-700">
             <div>
               <div className="text-xl font-bold">{activePanel === "agents" ? "Agent Management" : "Channel Management"}</div>
@@ -434,8 +493,55 @@ const LocalAgentsPanel: React.FC = () => {
           )}
 
           {activePanel === "agents" ? (
-            <div className="grid gap-6 p-6 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-              <section id="create-agent" className="space-y-5">
+            <div className="space-y-6 p-6">
+              <section className="border-2 border-zinc-900 bg-[#fff9ed] p-5 dark:border-zinc-700 dark:bg-zinc-900">
+                <div className="mb-4 text-sm font-bold uppercase tracking-wide text-zinc-500">Selected Agent</div>
+                {selectedAgent ? (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-2xl font-bold">{agentTitle(selectedAgent)}</div>
+                      <div className="text-sm text-zinc-500">
+                        {runtimeLabel(agentRuntime(selectedAgent))}
+                        {selectedAgent.config?.model ? ` / ${selectedAgent.config.model}` : ""}
+                      </div>
+                    </div>
+                    {selectedAgent.config?.description && <div className="text-sm">{selectedAgent.config.description}</div>}
+                    {formatRuntimeConfig(selectedAgent.config?.runtime_config) && <div className="text-xs text-zinc-500">{formatRuntimeConfig(selectedAgent.config?.runtime_config)}</div>}
+                    <div>
+                      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Channels</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(selectedAgent.channels || []).map((channel) => (
+                          <span key={channel} className="border border-zinc-900 px-2 py-1 text-xs dark:border-zinc-700"># {channel}</span>
+                        ))}
+                        {(!selectedAgent.channels || selectedAgent.channels.length === 0) && <span className="text-sm text-zinc-500">None</span>}
+                      </div>
+                    </div>
+                    {selectedLocalAction && (
+                      <div className="border-t-2 border-zinc-900 pt-4 dark:border-zinc-700">
+                        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Local action</div>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="font-semibold">{selectedLocalAction.name}</div>
+                            <div className="text-sm text-zinc-500">
+                              {runtimeLabel(selectedLocalAction.runtime || selectedLocalAction.type)}
+                              {selectedLocalAction.model ? ` / ${selectedLocalAction.model}` : ""}
+                            </div>
+                            {formatRuntimeConfig(selectedLocalAction.runtime_config) && <div className="mt-1 text-xs text-zinc-500">{formatRuntimeConfig(selectedLocalAction.runtime_config)}</div>}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => actionCommand(selectedLocalAction.name, "start")}><Play className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="outline" onClick={() => actionCommand(selectedLocalAction.name, "stop")}><Square className="h-4 w-4" /></Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm text-zinc-500">No agent selected</div>
+                )}
+              </section>
+
+              <section id="create-agent" className="space-y-5 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
                 <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
                   <CirclePlus className="h-4 w-4" />
                   Create Agent
@@ -458,7 +564,7 @@ const LocalAgentsPanel: React.FC = () => {
                   <div className="space-y-2">
                     <Label>Model</Label>
                     <select className={selectClassName} value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-                      {RUNTIME_MODELS[selectedRuntime].map((model) => <option key={model} value={model}>{model}</option>)}
+                      {currentModelOptions.map((model) => <option key={model.value} value={model.value}>{model.label || model.value}</option>)}
                     </select>
                   </div>
                   {selectedRuntime === "codex" && (
@@ -466,7 +572,7 @@ const LocalAgentsPanel: React.FC = () => {
                       <div className="space-y-2">
                         <Label>Reasoning effort</Label>
                         <select className={selectClassName} value={codexReasoningEffort} onChange={(event) => setCodexReasoningEffort(event.target.value)}>
-                          {CODEX_REASONING_EFFORTS.map((value) => <option key={value} value={value}>{value}</option>)}
+                          {currentReasoningEfforts.map((value) => <option key={value} value={value}>{value}</option>)}
                         </select>
                       </div>
                       <div className="space-y-2">
@@ -517,32 +623,62 @@ const LocalAgentsPanel: React.FC = () => {
                 <Button onClick={createAction}>Create agent</Button>
               </section>
 
-              <section className="border-2 border-zinc-900 bg-[#fff9ed] p-4 dark:border-zinc-700 dark:bg-zinc-900">
-                <div className="mb-4 text-sm font-bold uppercase tracking-wide text-zinc-500">Selected Agent</div>
-                {selectedAgent ? (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="text-lg font-bold">{agentTitle(selectedAgent)}</div>
-                      <div className="text-sm text-zinc-500">{runtimeLabel(agentRuntime(selectedAgent))}{selectedAgent.config?.model ? ` / ${selectedAgent.config.model}` : ""}</div>
-                    </div>
-                    {selectedAgent.config?.description && <div className="text-sm">{selectedAgent.config.description}</div>}
-                    {formatRuntimeConfig(selectedAgent.config?.runtime_config) && <div className="text-xs text-zinc-500">{formatRuntimeConfig(selectedAgent.config?.runtime_config)}</div>}
-                    <div className="text-xs uppercase tracking-wide text-zinc-500">Channels</div>
-                    <div className="flex flex-wrap gap-2">
-                      {(selectedAgent.channels || []).map((channel) => (
-                        <span key={channel} className="border border-zinc-900 px-2 py-1 text-xs dark:border-zinc-700"># {channel}</span>
-                      ))}
-                      {(!selectedAgent.channels || selectedAgent.channels.length === 0) && <span className="text-sm text-zinc-500">None</span>}
-                    </div>
+              <section className="space-y-5">
+                <div className="space-y-3 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
+                  <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
+                    <Cable className="h-4 w-4" />
+                    Local connector
                   </div>
-                ) : (
-                  <div className="text-sm text-zinc-500">No agent selected</div>
-                )}
+                  <div className="space-y-2">
+                    <Label>URL</Label>
+                    <Input value={settings.url} onChange={(event) => setSettings({ ...settings, url: event.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Pairing token</Label>
+                    <Input value={settings.token} onChange={(event) => setSettings({ ...settings, token: event.target.value })} type="password" />
+                  </div>
+                  <Button onClick={saveConnector}>Save connector</Button>
+                </div>
+
+                <div className="space-y-3 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
+                  <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
+                    <KeyRound className="h-4 w-4" />
+                    Coco runtime defaults
+                  </div>
+                  <div className="space-y-2">
+                    <Label>COCO_BIN</Label>
+                    <Input value={cocoBin} onChange={(event) => setCocoBin(event.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>COCO_ARGS</Label>
+                    <Input value={cocoArgs} onChange={(event) => setCocoArgs(event.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>COCO_WORKDIR</Label>
+                    <Input value={cocoWorkdir} onChange={(event) => setCocoWorkdir(event.target.value)} />
+                  </div>
+                  <Button onClick={saveProvider}>Save runtime</Button>
+                </div>
               </section>
             </div>
           ) : (
-            <div className="grid gap-6 p-6 2xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-              <section id="create-channel" className="space-y-5">
+            <div className="space-y-6 p-6">
+              <section className="border-2 border-zinc-900 bg-[#fff9ed] p-5 dark:border-zinc-700 dark:bg-zinc-900">
+                <div className="mb-4 text-sm font-bold uppercase tracking-wide text-zinc-500">Selected Channel</div>
+                {selectedChannel ? (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-2xl font-bold"># {selectedChannel.name}</div>
+                      <div className="text-sm text-zinc-500">{selectedChannel.channel_name}</div>
+                    </div>
+                    {selectedChannel.description && <div className="text-sm">{selectedChannel.description}</div>}
+                  </div>
+                ) : (
+                  <div className="text-sm text-zinc-500">No channel selected</div>
+                )}
+              </section>
+
+              <section id="create-channel" className="space-y-5 border-2 border-zinc-900 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-950">
                 <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
                   <CirclePlus className="h-4 w-4" />
                   Create Channel
@@ -559,91 +695,9 @@ const LocalAgentsPanel: React.FC = () => {
                 </div>
                 <Button onClick={createChannel}>Create channel</Button>
               </section>
-
-              <section className="border-2 border-zinc-900 bg-[#fff9ed] p-4 dark:border-zinc-700 dark:bg-zinc-900">
-                <div className="mb-4 text-sm font-bold uppercase tracking-wide text-zinc-500">Selected Channel</div>
-                {selectedChannel ? (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="text-lg font-bold"># {selectedChannel.name}</div>
-                      <div className="text-sm text-zinc-500">{selectedChannel.channel_name}</div>
-                    </div>
-                    {selectedChannel.description && <div className="text-sm">{selectedChannel.description}</div>}
-                  </div>
-                ) : (
-                  <div className="text-sm text-zinc-500">No channel selected</div>
-                )}
-              </section>
             </div>
           )}
         </main>
-
-        <aside className={`${paneClassName} min-h-0 overflow-y-auto`}>
-          <div className="flex h-16 items-center gap-2 border-b-2 border-zinc-900 px-5 text-lg font-bold dark:border-zinc-700">
-            <Cable className="h-5 w-5" />
-            Runtime
-          </div>
-          <div className="space-y-6 p-5">
-            <section className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
-                <Cable className="h-4 w-4" />
-                Local connector
-              </div>
-              <div className="space-y-2">
-                <Label>URL</Label>
-                <Input value={settings.url} onChange={(event) => setSettings({ ...settings, url: event.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label>Pairing token</Label>
-                <Input value={settings.token} onChange={(event) => setSettings({ ...settings, token: event.target.value })} type="password" />
-              </div>
-              <Button onClick={saveConnector} className="w-full">Save connector</Button>
-            </section>
-
-            <section className="space-y-3 border-t-2 border-zinc-900 pt-5 dark:border-zinc-700">
-              <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-zinc-500">
-                <KeyRound className="h-4 w-4" />
-                Coco runtime
-              </div>
-              <div className="space-y-2">
-                <Label>COCO_BIN</Label>
-                <Input value={cocoBin} onChange={(event) => setCocoBin(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>COCO_ARGS</Label>
-                <Input value={cocoArgs} onChange={(event) => setCocoArgs(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>COCO_WORKDIR</Label>
-                <Input value={cocoWorkdir} onChange={(event) => setCocoWorkdir(event.target.value)} />
-              </div>
-              <Button onClick={saveProvider} className="w-full">Save runtime</Button>
-            </section>
-
-            <section className="space-y-3 border-t-2 border-zinc-900 pt-5 dark:border-zinc-700">
-              <div className="text-sm font-bold uppercase tracking-wide text-zinc-500">Local action</div>
-              {selectedLocalAction ? (
-                <div className="space-y-3">
-                  <div>
-                    <div className="font-semibold">{selectedLocalAction.name}</div>
-                    <div className="text-sm text-zinc-500">
-                      {runtimeLabel(selectedLocalAction.runtime || selectedLocalAction.type)}
-                      {selectedLocalAction.model ? ` / ${selectedLocalAction.model}` : ""}
-                    </div>
-                    {selectedLocalAction.description && <div className="mt-1 text-sm">{selectedLocalAction.description}</div>}
-                    {formatRuntimeConfig(selectedLocalAction.runtime_config) && <div className="mt-1 text-xs text-zinc-500">{formatRuntimeConfig(selectedLocalAction.runtime_config)}</div>}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => actionCommand(selectedLocalAction.name, "start")}><Play className="h-4 w-4" /></Button>
-                    <Button size="sm" variant="outline" onClick={() => actionCommand(selectedLocalAction.name, "stop")}><Square className="h-4 w-4" /></Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm text-zinc-500">No local action selected</div>
-              )}
-            </section>
-          </div>
-        </aside>
       </div>
     </div>
   )

@@ -122,6 +122,7 @@ const RootLayoutContent: React.FC<RootLayoutProps> = ({ children }) => {
   const HIDE_SECONDARY_SIDEBAR_ROUTES = [
     "/user-dashboard",
     "/readme",
+    "/agents",
     "/messaging",
     "/feed",
     "/project",

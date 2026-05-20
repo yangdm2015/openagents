@@ -1,15 +1,20 @@
 'use strict';
 
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
 
 class LocalApiServer {
-  constructor({ connector, host = '127.0.0.1', port = 45555 } = {}) {
+  constructor({ connector, host = '127.0.0.1', port = 45555, runtimeModelResolver = null } = {}) {
     if (!connector) throw new Error('connector is required');
     this.connector = connector;
     this.host = host || '127.0.0.1';
-    this.requestedPort = Number(port || 45555);
+    this.requestedPort = port === 0 ? 0 : Number(port || 45555);
     this.server = null;
     this.port = this.requestedPort;
+    this.runtimeModelResolver = runtimeModelResolver;
   }
 
   async start() {
@@ -70,6 +75,10 @@ class LocalApiServer {
       const actionMatch = url.pathname.match(/^\/api\/actions\/([^/]+)(?:\/(start|stop|restart|logs))?$/);
       if (actionMatch) {
         return this._actionCommand(req, res, decodeURIComponent(actionMatch[1]), actionMatch[2]);
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/runtime-options') {
+        return this._json(res, 200, { success: true, runtimes: await this._runtimeOptions() });
       }
 
       if (req.method === 'GET' && url.pathname === '/api/providers') {
@@ -213,6 +222,90 @@ class LocalApiServer {
       protocol: 'sdk',
     });
     return slug;
+  }
+
+  async _runtimeOptions() {
+    if (this.runtimeModelResolver) return this.runtimeModelResolver();
+    return [
+      this._codexRuntimeOptions(),
+      this._claudeRuntimeOptions(),
+      this._cocoRuntimeOptions(),
+    ];
+  }
+
+  _codexRuntimeOptions() {
+    const models = [];
+    try {
+      const output = execFileSync('codex', ['debug', 'models'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const data = JSON.parse(output);
+      for (const model of data.models || []) {
+        if (model.visibility !== 'list') continue;
+        models.push({
+          value: model.slug,
+          label: model.display_name || model.slug,
+          default_reasoning: model.default_reasoning_level || '',
+          reasoning_efforts: (model.supported_reasoning_levels || []).map((item) => item.effort).filter(Boolean),
+        });
+      }
+    } catch {}
+    return {
+      runtime: 'codex',
+      models,
+      default_model: models[0] ? models[0].value : '',
+      source: models.length > 0 ? 'codex debug models' : 'unavailable',
+    };
+  }
+
+  _claudeRuntimeOptions() {
+    const models = [];
+    try {
+      execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+      const configured = String(process.env.CLAUDE_MODEL || '').trim();
+      if (configured) models.push({ value: configured, label: configured });
+    } catch {}
+    return {
+      runtime: 'claude',
+      models,
+      default_model: models[0] ? models[0].value : '',
+      source: models.length > 0 ? 'CLAUDE_MODEL' : 'claude CLI unavailable',
+    };
+  }
+
+  _cocoRuntimeOptions() {
+    const models = [];
+    const configModel = this._readCocoConfigModel();
+    if (configModel) models.push({ value: configModel, label: configModel });
+    return {
+      runtime: 'coco',
+      models,
+      default_model: models[0] ? models[0].value : '',
+      source: models.length > 0 ? '~/.trae/traecli.yaml' : 'unavailable',
+    };
+  }
+
+  _readCocoConfigModel() {
+    const configFile = path.join(os.homedir(), '.trae', 'traecli.yaml');
+    try {
+      const text = fs.readFileSync(configFile, 'utf8');
+      const lines = text.split(/\r?\n/);
+      let inModel = false;
+      for (const line of lines) {
+        if (/^model:\s*$/.test(line)) {
+          inModel = true;
+          continue;
+        }
+        if (inModel && /^\S/.test(line)) break;
+        if (inModel) {
+          const match = line.match(/^\s+name:\s*(.+?)\s*$/);
+          if (match) return match[1].replace(/^['\"]|['\"]$/g, '').trim();
+        }
+      }
+    } catch {}
+    return '';
   }
 
   async _agentAction(req, res, name, action) {

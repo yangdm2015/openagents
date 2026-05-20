@@ -84,3 +84,36 @@ test('local API requires pairing token and stores SDK action config locally', as
     await server.stop();
   }
 });
+
+
+test('local API exposes runtime model options', async () => {
+  const connector = new AgentConnector({ configDir: tmpDir() });
+  const server = new LocalApiServer({
+    connector,
+    port: 0,
+    runtimeModelResolver: async () => [{
+      runtime: 'codex',
+      models: [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
+      default_model: 'gpt-5.5',
+      source: 'test resolver',
+    }],
+  });
+  await server.start();
+  const baseUrl = `http://127.0.0.1:${server.port}`;
+
+  try {
+    const token = connector.getPairingToken();
+    const result = await request(baseUrl, 'GET', '/api/runtime-options', undefined, token);
+
+    assert.equal(result.res.status, 200);
+    assert.equal(result.data.success, true);
+    assert.deepEqual(result.data.runtimes, [{
+      runtime: 'codex',
+      models: [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
+      default_model: 'gpt-5.5',
+      source: 'test resolver',
+    }]);
+  } finally {
+    await server.stop();
+  }
+});
